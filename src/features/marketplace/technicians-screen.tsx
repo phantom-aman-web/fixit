@@ -37,7 +37,7 @@ import {
 import {
   EmptyState,
   ErrorState,
-  LoadingState,
+  ListSkeleton,
   PageContainer,
   PageHeader,
 } from "@/components/shared/states";
@@ -45,6 +45,8 @@ import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi, useApiMutation, apiFetch } from "@/hooks/use-api";
 import { navigate, useRouter } from "@/store/router";
 import { formatCurrency } from "@/lib/format";
+import { scoreItem } from "@/lib/search/ranking";
+import { ContextualSearch } from "@/components/search/contextual-search";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -313,7 +315,7 @@ function TechnicianCard({
             <Button
               size="sm"
               className="flex-1"
-              onClick={() => navigate("diagnose?hint=technician")}
+              onClick={() => navigate(`diagnose?technicianId=${tech.id}`)}
             >
               Start a diagnosis
             </Button>
@@ -338,6 +340,7 @@ export function TechniciansScreen() {
   const [minRating, setMinRating] = useState<string>("0");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [area, setArea] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("relevance");
 
   // Build the API URL with query params for server-side filtering.
   const techQuery = useMemo(() => {
@@ -387,6 +390,7 @@ export function TechniciansScreen() {
   const selectMutation = useApiMutation<{ request: RepairRequest }>(
     requestId ? `/api/repair-requests/${requestId}/select` : "/api/repair-requests/_/select",
     "POST",
+    [["history"]]
   );
 
   const technicians = useMemo(() => {
@@ -403,26 +407,38 @@ export function TechniciansScreen() {
   }, [techData, contextRequest, matchByTech]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return technicians;
-    const q = search.trim().toLowerCase();
-    return technicians.filter(
-      (t) =>
-        t.displayName.toLowerCase().includes(q) ||
-        t.skills.some((s) => s.skill.toLowerCase().includes(q)),
-    );
-  }, [technicians, search]);
+    let result = technicians;
+    // Filtering logic was moved to ContextualSearch's onSearch
+    
+    // Sort logic
+    if (sortBy === "rating") {
+      result = [...result].sort((a, b) => b.rating - a.rating);
+    } else if (sortBy === "experience") {
+      result = [...result].sort((a, b) => b.yearsExperience - a.yearsExperience);
+    } else if (sortBy === "price_asc") {
+      result = [...result].sort((a, b) => (a.baseCallOutFee || 0) - (b.baseCallOutFee || 0));
+    }
+    // "relevance" keeps the default order (which is match rank if contextRequest exists, or rating otherwise)
+
+    return result;
+  }, [technicians, search, sortBy]);
+
+  const [selectingId, setSelectingId] = useState<string | null>(null);
 
   const onSelect = async (tech: Technician) => {
     if (!requestId) {
       navigate("diagnose?hint=technician");
       return;
     }
+    setSelectingId(tech.id);
     try {
       await selectMutation.mutateAsync({ technicianId: tech.id });
       toast.success(`Selected ${tech.displayName}. You can now book the repair.`);
       navigate(`booking/new?requestId=${requestId}`);
     } catch (e: any) {
       toast.error(e?.message ?? "Could not select technician");
+    } finally {
+      setSelectingId(null);
     }
   };
 
@@ -430,7 +446,7 @@ export function TechniciansScreen() {
     return (
       <PageContainer>
         <PageHeader title="Find a Technician" description="Browse verified technicians in Addis Ababa." />
-        <LoadingState label="Loading technicians…" />
+        <ListSkeleton />
       </PageContainer>
     );
   }
@@ -492,16 +508,37 @@ export function TechniciansScreen() {
         <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1.5">
             <Label htmlFor="search" className="text-xs">Search</Label>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="search"
-                placeholder="Name or skill…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8"
-              />
-            </div>
+            <ContextualSearch
+              queryKey="technician-search"
+              placeholder="Name, skill, or category…"
+              onSearch={async (q) => {
+                const qLower = q.trim();
+                if (!qLower) return [];
+                
+                return technicians.map(t => {
+                  const specialties = t.skills.map(s => s.skill).join(" ");
+                  const serviceAreas = t.serviceAreas.map(sa => sa.serviceArea.city + " " + sa.serviceArea.name).join(" ");
+                  const categorySlugs = t.skills.map(s => s.equipmentCategory).filter(Boolean).join(" ");
+                  
+                  const score = scoreItem(qLower, [
+                    { name: "specialty", value: specialties + " " + categorySlugs, weight: 10.0 },
+                    { name: "name", value: t.displayName, weight: 5.0 },
+                    { name: "skills", value: specialties, weight: 3.0 },
+                    { name: "serviceArea", value: serviceAreas, weight: 1.0 },
+                  ]);
+                  
+                  return {
+                    id: t.id,
+                    title: t.displayName,
+                    subtitle: t.skills[0]?.skill.replace("_", " ") || "Technician",
+                    score: score.score > 0 ? score.score + t.rating : 0 // rating as secondary tie-breaker
+                  };
+                }).filter(x => x.score > 0)
+                  .sort((a, b) => b.score - a.score)
+                  .slice(0, 5); // top 5 suggestions
+              }}
+              onSelect={(item) => navigate(`technicians/${item.id}`)}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -543,6 +580,19 @@ export function TechniciansScreen() {
             </Select>
           </div>
 
+          <div className="space-y-1.5">
+            <Label className="text-xs">Sort by</Label>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="relevance">Recommended</SelectItem>
+                <SelectItem value="rating">Highest Rated</SelectItem>
+                <SelectItem value="experience">Most Experienced</SelectItem>
+                <SelectItem value="price_asc">Lowest Call-out Fee</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-4">
             <Switch id="verified" checked={verifiedOnly} onCheckedChange={setVerifiedOnly} />
             <Label htmlFor="verified" className="text-sm">Verified technicians only</Label>
@@ -570,7 +620,7 @@ export function TechniciansScreen() {
               match={matchByTech.get(tech.id)}
               requestId={requestId}
               onSelect={onSelect}
-              isSelecting={selectMutation.isPending}
+              isSelecting={selectMutation.isPending && selectingId === tech.id}
             />
           ))}
         </div>

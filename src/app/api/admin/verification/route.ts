@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ok, apiError, requireRole, HttpError } from "@/lib/api";
 import { auditLog } from "@/services/audit-service";
+import { notifyAccountStatus } from "@/services/notifications";
 
 const schema = z.object({
   status: z.enum(["ACTIVE", "SUSPENDED"]),
@@ -18,14 +19,14 @@ export async function GET(req: NextRequest) {
 
     const documents = await db.technicianDocument.findMany({
       where: { status },
-      include: { technician: { include: { user: true, skills: true, serviceAreas: { include: { serviceArea: true } } } } },
+      include: { technician: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } }, skills: true, serviceAreas: { include: { serviceArea: true } } } } },
       orderBy: { createdAt: "desc" },
     });
 
     // Also list PENDING technicians (status PENDING on profile).
     const pendingTechs = await db.technicianProfile.findMany({
       where: { status: "PENDING" },
-      include: { user: true, skills: true, serviceAreas: { include: { serviceArea: true } }, documents: true },
+      include: { user: { select: { id: true, name: true, email: true, image: true, role: true } }, skills: true, serviceAreas: { include: { serviceArea: true } }, documents: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -47,15 +48,25 @@ export async function PATCH(req: NextRequest) {
     const technicianId = searchParams.get("technicianId");
 
     if (documentId) {
+      const isApproved = parsed.status === "ACTIVE";
       const doc = await db.technicianDocument.update({
         where: { id: documentId },
-        data: { status: parsed.status === "ACTIVE" ? "APPROVED" : "REJECTED", reviewedBy: admin.id },
+        data: { status: isApproved ? "APPROVED" : "REJECTED", reviewedBy: admin.id },
       });
       await auditLog({
         actorId: admin.id, actorRole: "ADMIN", action: "document_reviewed",
         entityType: "technician_document", entityId: documentId,
         metadata: { status: doc.status },
       });
+
+      // Auto-verify technician if document is approved
+      if (isApproved) {
+        await db.technicianProfile.update({
+          where: { id: doc.technicianId },
+          data: { verified: true, status: "ACTIVE" }
+        });
+      }
+
       return ok({ document: doc });
     }
 
@@ -70,15 +81,10 @@ export async function PATCH(req: NextRequest) {
         metadata: { status: parsed.status, verified: tech.verified },
       });
 
-      // Notify technician.
-      await db.notification.create({
-        data: {
-          userId: tech.userId,
-          type: "verification_update",
-          title: parsed.status === "ACTIVE" ? "Your account has been approved" : "Your account has been suspended",
-          body: parsed.status === "ACTIVE" ? "You can now receive repair requests." : "Please contact support.",
-          dataJson: JSON.stringify({ technicianId }),
-        },
+      // Notify technician (in-app + email) via centralized service.
+      void notifyAccountStatus({
+        technicianId: technicianId,
+        newStatus: parsed.status as "ACTIVE" | "SUSPENDED",
       });
 
       return ok({ technician: tech });
@@ -89,3 +95,4 @@ export async function PATCH(req: NextRequest) {
     return apiError(e);
   }
 }
+

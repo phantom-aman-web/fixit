@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { ok, apiError, requireCustomerProfile, HttpError } from "@/lib/api";
+import { checkGeneralRateLimit } from "@/lib/rate-limit";
 import { storage } from "@/lib/providers/storage";
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -24,7 +25,13 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const { profile } = await requireCustomerProfile();
+    const { user, profile } = await requireCustomerProfile();
+    
+    const rl = checkGeneralRateLimit(user.id, "upload");
+    if (!rl.allowed) {
+      throw new HttpError(429, `Rate limit exceeded. Try again in ${Math.ceil(rl.retryAfterMs / 1000)}s.`);
+    }
+
     const body = await req.json();
     const parsed = schema.parse(body);
 

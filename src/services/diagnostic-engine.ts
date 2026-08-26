@@ -138,13 +138,21 @@ async function recompute(sessionId: string): Promise<SessionState> {
   const answers = parseAnswers(session.answersJson);
   const symptomId = session.symptomId ?? undefined;
 
-  // Load all causes for this category (optionally filtered by symptom via rules).
-  const causes = await db.possibleCause.findMany({
-    where: { categoryId: session.categoryId },
-  });
   const rules = await db.diagnosticRule.findMany({
     where: { categoryId: session.categoryId, ...(symptomId ? { symptomId } : {}) },
   });
+
+  const validCauseIds = Array.from(new Set(rules.map((r) => r.causeId)));
+  
+  // Load causes that have rules for this symptom.
+  const causes = validCauseIds.length > 0 
+    ? await db.possibleCause.findMany({
+        where: { 
+          categoryId: session.categoryId,
+          id: { in: validCauseIds }
+        },
+      })
+    : [];
 
   // Score each cause.
   const evidence: Record<string, { weight: number; reasons: string[]; escalate: boolean; escalateReason?: string }> = {};

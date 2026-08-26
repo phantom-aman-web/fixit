@@ -77,6 +77,17 @@ export async function POST(req: NextRequest) {
       data: { status: "QUOTED" },
     });
 
+    // Also update the active Booking to QUOTE_SUBMITTED.
+    const activeBooking = await db.booking.findFirst({
+      where: { repairRequestId: parsed.repairRequestId, status: "ACCEPTED" },
+    });
+    if (activeBooking) {
+      await db.booking.update({
+        where: { id: activeBooking.id },
+        data: { status: "QUOTE_SUBMITTED", quoteId: quote.id },
+      });
+    }
+
     await notifyQuoteSubmitted(quote.id);
 
     return ok({ quote }, 201);

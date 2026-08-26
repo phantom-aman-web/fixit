@@ -8,6 +8,9 @@ const schema = z.object({
   equipmentId: z.string().optional(),
   description: z.string().min(5).max(2000),
   urgency: z.enum(["LOW", "NORMAL", "HIGH", "EMERGENCY"]).default("NORMAL"),
+  customCategoryName: z.string().optional(),
+  customSymptom: z.string().optional(),
+  symptomIds: z.array(z.string()).default([]),
 });
 
 export async function GET() {
@@ -40,6 +43,9 @@ export async function POST(req: NextRequest) {
         equipmentId: parsed.equipmentId,
         description: parsed.description,
         urgency: parsed.urgency,
+        customCategoryName: parsed.customCategoryName,
+        customSymptom: parsed.customSymptom,
+        symptomIds: parsed.symptomIds,
       },
       include: { category: true },
     });

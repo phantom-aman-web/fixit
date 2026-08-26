@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       totalScore: match.score,
     }, null, 2);
 
-    const result = await explainMatch(profile.userId, matchData);
+    const result = await explainMatch(profile.id, matchData);
 
     return ok({
       explanation: result.explanation,

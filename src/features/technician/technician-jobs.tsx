@@ -30,7 +30,9 @@ import {
 import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi } from "@/hooks/use-api";
 import { navigate } from "@/store/router";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { formatCurrency, formatDateTime, timeAgo } from "@/lib/format";
+import { ContextualSearch, type SearchResultItem } from "@/components/search/contextual-search";
+import { scoreItem } from "@/lib/search/ranking";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -41,72 +43,74 @@ type Customer = { id: string; subCity?: string | null; phone?: string | null; us
 type Quote = { id: string; totalEstimate: number; status: string };
 
 type Job = {
-  id: string;
-  status: string;
-  startedAt?: string | null;
-  completedAt?: string | null;
+  id: string; // Booking ID
+  status: string; // Booking status
   createdAt: string;
-  booking: {
+  scheduledAt: string;
+  location: string;
+  customer?: Customer | null;
+  repairRequest: { problem: Problem };
+  quote?: Quote | null;
+  repairJob?: {
     id: string;
-    scheduledAt: string;
-    location: string;
-    customer?: Customer | null;
-    repairRequest: { problem: Problem };
-    quote?: Quote | null;
-  };
+    status: string;
+    startedAt?: string | null;
+    completedAt?: string | null;
+  } | null;
 };
 
 const STATUS_GROUPS: { value: string; label: string }[] = [
   { value: "all", label: "All jobs" },
-  { value: "SCHEDULED", label: "Scheduled" },
-  { value: "EN_ROUTE", label: "En route" },
-  { value: "ARRIVED", label: "Arrived" },
-  { value: "INSPECTING", label: "Inspecting" },
-  { value: "DIAGNOSING", label: "Diagnosing" },
+  { value: "REQUESTED", label: "Requested" },
+  { value: "ACCEPTED", label: "Accepted" },
   { value: "QUOTE_SUBMITTED", label: "Quote submitted" },
-  { value: "AWAITING_APPROVAL", label: "Awaiting approval" },
-  { value: "REPAIRING", label: "Repairing" },
+  { value: "AWAITING_PAYMENT", label: "Awaiting payment" },
+  { value: "CONFIRMED", label: "Confirmed" },
   { value: "COMPLETED", label: "Completed" },
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
 function JobRow({ job }: { job: Job }) {
+  // If there's a RepairJob, it means the booking is CONFIRMED and the tech is doing the physical work.
+  // We can show the physical status (e.g. EN_ROUTE) instead if we want, or just the booking status.
+  const displayStatus = job.repairJob && job.status === "CONFIRMED" ? job.repairJob.status : job.status;
+
   return (
     <Card className="overflow-hidden transition-shadow hover:shadow-md">
       <button
-        onClick={() => navigate(`repair/${job.id}`)}
+        onClick={() => navigate(`booking/${job.id}`)}
         className="block w-full text-left"
         aria-label={`Open job ${job.id}`}
       >
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={job.status} />
-              {job.booking.repairRequest.problem.category && (
+              <StatusBadge status={displayStatus} />
+              {job.repairRequest.problem.category && (
                 <Badge variant="secondary" className="text-xs">
-                  {job.booking.repairRequest.problem.category.name}
+                  {job.repairRequest.problem.category.name}
                 </Badge>
               )}
               <span className="ml-auto text-xs text-muted-foreground">{timeAgo(job.createdAt)}</span>
             </div>
             <p className="mt-1.5 line-clamp-2 text-sm">
-              {job.booking.repairRequest.problem.description}
+              {job.repairRequest.problem.description}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <span className="inline-flex items-center gap-1">
-                <CalendarClock className="h-3 w-3" /> {formatDateTime(job.booking.scheduledAt)}
+                <CalendarClock className="h-3 w-3" /> {formatDateTime(job.scheduledAt)}
               </span>
               <span className="inline-flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> {job.booking.location}
+                <MapPin className="h-3 w-3" /> {job.location}
               </span>
-              {job.booking.customer && (
-                <span>{job.booking.customer.user?.name ?? job.booking.customer.user?.email ?? "Customer"}</span>
+              {job.customer && (
+                <span>{job.customer.user?.name ?? job.customer.user?.email ?? "Customer"}</span>
               )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {job.booking.quote && (
-              <span className="text-sm font-medium">{job.booking.quote.totalEstimate.toLocaleString()} ETB</span>
+            {job.quote && (
+              <span className="text-sm font-medium">{formatCurrency(job.quote.totalEstimate)}</span>
             )}
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </div>
@@ -117,20 +121,27 @@ function JobRow({ job }: { job: Job }) {
 }
 
 export function TechnicianJobs() {
-  const { data: session, status } = useSession();
-  const role = session?.user?.role;
+  const { status, data: session } = useSession();
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
+  const role = session?.user?.role;
 
   const { data, isLoading, isError, error, refetch } = useApi<{ jobs: Job[] }>(
-    ["technician-jobs", "list"],
+    ["technician-jobs"],
     "/api/technician/jobs",
+    { staleTime: 30_000 }
   );
 
   const jobs = useMemo(() => {
-    const list = data?.jobs ?? [];
-    if (statusFilter === "all") return list;
-    return list.filter((j) => j.status === statusFilter);
-  }, [data, statusFilter]);
+    let list = data?.jobs ?? [];
+    if (statusFilter !== "all") {
+      list = list.filter((j) => j.status === statusFilter);
+    }
+    
+    // Filtering logic was moved to ContextualSearch's onSearch
+    
+    return list;
+  }, [data, statusFilter, search]);
 
   if (status === "loading" || isLoading) {
     return (
@@ -176,7 +187,42 @@ export function TechnicianJobs() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Filter</span>
+        <ContextualSearch
+          queryKey="jobs-search"
+          placeholder="Search jobs..."
+          className="w-full sm:w-64"
+          onSearch={async (q) => {
+            const qLower = q.trim();
+            if (!qLower) return [];
+            
+            const list = data?.jobs ?? [];
+            return list.map(job => {
+              const score = scoreItem(qLower, [
+                { name: "customer", value: job.customer?.user?.name, weight: 10.0 },
+                { name: "equipment", value: job.repairRequest.problem?.category?.name, weight: 5.0 },
+                { name: "bookingRef", value: job.id?.substring(0, 8), weight: 3.0 },
+                { name: "status", value: job.status, weight: 1.0 },
+                { name: "date", value: job.createdAt, weight: 0.5 },
+              ]);
+              return {
+                id: job.id,
+                title: job.customer?.user?.name || "Job",
+                subtitle: job.repairRequest.problem?.category?.name || "Equipment",
+                score: score.score,
+                job
+              };
+            }).filter(x => x.score > 0)
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5);
+          }}
+          onSelect={(item) => {
+            // @ts-ignore
+            const job = item.job;
+            if (job.repairJob) navigate(`repair/${job.repairJob.id}`);
+            else navigate(`booking/${job.id}`);
+          }}
+        />
+        <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">Filter</span>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-8 w-[200px]"><SelectValue /></SelectTrigger>
           <SelectContent>

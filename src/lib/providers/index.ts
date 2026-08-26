@@ -47,19 +47,7 @@ class NoopRealtimeProvider implements RealtimeProvider {
 }
 
 // ─────────────────────────── PaymentProvider ────────────────────────────────
-export interface PaymentIntent {
-  id: string;
-  amount: number;
-  currency: string;
-  status: "PENDING" | "SUCCEEDED" | "FAILED";
-  providerRef: string;
-}
-
-export interface PaymentProvider {
-  createIntent(params: { amount: number; currency: string; bookingId: string }): Promise<PaymentIntent>;
-  capture(intentId: string): Promise<PaymentIntent>;
-  refund(intentId: string): Promise<PaymentIntent>;
-}
+export * from "./payment";
 
 // ─────────────────────────── AIProvider (DISABLED) ──────────────────────────
 export interface AIProvider {

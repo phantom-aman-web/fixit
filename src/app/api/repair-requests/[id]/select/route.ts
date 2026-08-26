@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { ok, apiError, requireCustomerProfile, HttpError } from "@/lib/api";
+import { notifyTechnicianAssigned } from "@/services/notifications";
 
 const schema = z.object({ technicianId: z.string() });
 
@@ -24,22 +25,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: { technicianId: parsed.technicianId, status: "TECHNICIAN_SELECTED" },
     });
 
-    // Notify technician.
-    const tech = await db.technicianProfile.findUnique({
-      where: { id: parsed.technicianId },
-      include: { user: true },
+    // Notify both customer and technician (in-app + email) via centralized service.
+    // Fire and forget — notification failure must not roll back the selection.
+    void notifyTechnicianAssigned({
+      requestId: id,
+      customerId: rr.customerId,
+      technicianId: parsed.technicianId,
+      scheduledAt: new Date(), // Booking date TBD — use current time as placeholder
     });
-    if (tech) {
-      await db.notification.create({
-        data: {
-          userId: tech.userId,
-          type: "repair_request_received",
-          title: "New repair request",
-          body: `A customer selected you for a ${rr.id.slice(-6)} repair request.`,
-          dataJson: JSON.stringify({ repairRequestId: id }),
-        },
-      });
-    }
 
     return ok({ request: updated });
   } catch (e) {

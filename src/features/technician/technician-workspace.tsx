@@ -30,6 +30,7 @@ import {
   LoadingState,
   PageContainer,
   PageHeader,
+  DashboardSkeleton,
 } from "@/components/shared/states";
 import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi, useApiMutation } from "@/hooks/use-api";
@@ -95,6 +96,7 @@ type Earnings = {
 
 type DashboardData = {
   dashboard: {
+    status?: string;
     today: Job[];
     requests: IncomingRequest[];
     activeJobs: Job[];
@@ -171,10 +173,24 @@ function StatCard({
 // Incoming request card
 // ────────────────────────────────────────────────────────────────────────────────
 
-function IncomingRequestCard({ req, onAction }: { req: IncomingRequest; onAction: () => void }) {
+function IncomingRequestCard({ req, onAction, disabled }: { req: IncomingRequest; onAction: () => void; disabled?: boolean }) {
   const acceptBooking = useApiMutation(
     req.booking ? `/api/bookings/${req.booking.id}/transition` : "/api/bookings/_/transition",
     "POST",
+    [["technician-dashboard"], ["technician-jobs"]],
+    {
+      queryKey: ["technician-dashboard"],
+      updater: (oldData: any, newVars: any) => {
+        if (!oldData || !oldData.dashboard) return oldData;
+        return {
+          ...oldData,
+          dashboard: {
+            ...oldData.dashboard,
+            requests: oldData.dashboard.requests.filter((r: any) => r.id !== req.id)
+          }
+        };
+      }
+    }
   );
 
   const customer = req.customer;
@@ -228,11 +244,11 @@ function IncomingRequestCard({ req, onAction }: { req: IncomingRequest; onAction
           </div>
         )}
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={accept} disabled={acceptBooking.isPending} size="sm" className="flex-1">
+          <Button onClick={accept} disabled={disabled || acceptBooking.isPending} size="sm" className="flex-1">
             <CheckCircle2 className="h-4 w-4" />
             {booking ? "Accept" : "Awaiting booking"}
           </Button>
-          <Button onClick={decline} disabled={acceptBooking.isPending} size="sm" variant="outline" className="flex-1">
+          <Button onClick={decline} disabled={disabled || acceptBooking.isPending} size="sm" variant="outline" className="flex-1">
             <XCircle className="h-4 w-4" /> Decline
           </Button>
           {booking?.id && (
@@ -254,8 +270,8 @@ function IncomingRequestCard({ req, onAction }: { req: IncomingRequest; onAction
 // Active job row with quick-advance
 // ────────────────────────────────────────────────────────────────────────────────
 
-function ActiveJobRow({ job, onAction }: { job: Job; onAction: () => void }) {
-  const transition = useApiMutation(`/api/repair-jobs/${job.id}/transition`, "POST");
+function ActiveJobRow({ job, onAction, disabled }: { job: Job; onAction: () => void; disabled?: boolean }) {
+  const transition = useApiMutation(`/api/repair-jobs/${job.id}/transition`, "POST", [["technician-dashboard"], ["technician-jobs"]]);
   const next = JOB_NEXT[job.status] ?? null;
 
   const advance = async () => {
@@ -296,7 +312,7 @@ function ActiveJobRow({ job, onAction }: { job: Job; onAction: () => void }) {
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
           {next ? (
-            <Button onClick={advance} disabled={transition.isPending} size="sm">
+            <Button onClick={advance} disabled={disabled || transition.isPending} size="sm">
               {JOB_NEXT_LABEL[next]}
             </Button>
           ) : (
@@ -359,7 +375,7 @@ export function TechnicianWorkspace() {
   const { data, isLoading, isError, error, refetch } = useApi<DashboardData>(
     ["technician-dashboard"],
     "/api/technician/dashboard",
-    { refetchInterval: 20_000 },
+    { refetchInterval: 15_000, staleTime: 30_000 }
   );
 
   const dash = data?.dashboard;
@@ -370,11 +386,12 @@ export function TechnicianWorkspace() {
   const awaitingApproval = useMemo(() => dash?.awaitingApproval ?? [], [dash]);
   const performance = dash?.performance;
   const earnings = dash?.earnings;
+  const isPending = dash?.status === "PENDING";
 
   if (status === "loading") {
     return (
       <PageContainer>
-        <LoadingState label="Loading workspace…" />
+        <DashboardSkeleton />
       </PageContainer>
     );
   }
@@ -409,7 +426,7 @@ export function TechnicianWorkspace() {
     return (
       <PageContainer>
         <PageHeader title="Technician workspace" description="Your incoming requests and active jobs at a glance." />
-        <LoadingState label="Loading workspace…" />
+        <DashboardSkeleton />
       </PageContainer>
     );
   }
@@ -432,6 +449,19 @@ export function TechnicianWorkspace() {
 
   return (
     <PageContainer>
+      {isPending && (
+        <div className="mb-6 rounded-md bg-amber-500/10 p-4 border border-amber-500/20 text-amber-600 dark:text-amber-400">
+          <div className="flex gap-3">
+            <ShieldAlert className="h-5 w-5 shrink-0" />
+            <div>
+              <h3 className="font-semibold text-sm">Account pending approval</h3>
+              <p className="text-sm mt-1">
+                Your account is currently under review by an administrator. You can explore the workspace, but you will not be able to accept jobs or submit quotes until approved.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       <PageHeader
         title="Technician workspace"
         description="Today's appointments, incoming requests, and your performance at a glance."
@@ -508,7 +538,7 @@ export function TechnicianWorkspace() {
           }
         >
           {todayJobs.map((job) => (
-            <TodayJobCard key={job.id} job={job} onAction={() => refetch()} />
+            <TodayJobCard key={job.id} job={job} onAction={() => refetch()} disabled={isPending} />
           ))}
         </Section>
 
@@ -526,7 +556,7 @@ export function TechnicianWorkspace() {
           }
         >
           {requests.map((r) => (
-            <IncomingRequestCard key={r.id} req={r} onAction={() => refetch()} />
+            <IncomingRequestCard key={r.id} req={r} onAction={() => refetch()} disabled={isPending} />
           ))}
         </Section>
 
@@ -544,7 +574,7 @@ export function TechnicianWorkspace() {
           }
         >
           {activeJobs.map((j) => (
-            <ActiveJobRow key={j.id} job={j} onAction={() => refetch()} />
+            <ActiveJobRow key={j.id} job={j} onAction={() => refetch()} disabled={isPending} />
           ))}
         </Section>
 
@@ -574,8 +604,8 @@ export function TechnicianWorkspace() {
 // Today's appointment card
 // ────────────────────────────────────────────────────────────────────────────────
 
-function TodayJobCard({ job, onAction }: { job: Job; onAction: () => void }) {
-  const transition = useApiMutation(`/api/repair-jobs/${job.id}/transition`, "POST");
+function TodayJobCard({ job, onAction, disabled }: { job: Job; onAction: () => void; disabled?: boolean }) {
+  const transition = useApiMutation(`/api/repair-jobs/${job.id}/transition`, "POST", [["technician-dashboard"], ["technician-jobs"]]);
   const next = JOB_NEXT[job.status] ?? null;
   const isStarting = job.status === "SCHEDULED";
 
@@ -616,7 +646,7 @@ function TodayJobCard({ job, onAction }: { job: Job; onAction: () => void }) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {next && (
-            <Button onClick={advance} disabled={transition.isPending} size="sm">
+            <Button onClick={advance} disabled={disabled || transition.isPending} size="sm">
               {isStarting ? "Start job" : JOB_NEXT_LABEL[next]}
             </Button>
           )}

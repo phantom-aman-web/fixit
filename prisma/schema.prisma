@@ -1,6 +1,3 @@
-// FixIt — Prisma schema (Phase 1: SQLite)
-// Enum-like fields are String (SQLite has no native enums); validated in src/types via zod.
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,24 +8,23 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ──────────────────────────────── Identity & Auth ────────────────────────────────
-
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  emailVerified DateTime?
-  name          String?
-  image         String?
-  passwordHash  String?
-  role          String    @default("CUSTOMER") // CUSTOMER | TECHNICIAN | ADMIN
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
+  id                String             @id @default(cuid())
+  email             String             @unique
+  emailVerified     DateTime?
+  name              String?
+  image             String?
+  passwordHash      String?
+  role              String             @default("CUSTOMER")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastSeenAt        DateTime?
   accounts          Account[]
-  sessions          Session[]
   customerProfile   CustomerProfile?
-  technicianProfile TechnicianProfile?
+  sentMessages      Message[]
   notifications     Notification[]
+  sessions          Session[]
+  technicianProfile TechnicianProfile?
 }
 
 model Account {
@@ -44,8 +40,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -55,8 +50,7 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
@@ -68,124 +62,122 @@ model VerificationToken {
 }
 
 model CustomerProfile {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  phone     String?
-  city      String   @default("Addis Ababa")
-  subCity   String? // Bole, Kazanchis, ...
-  latitude  Float?
-  longitude Float?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  equipment          CustomerEquipment[]
-  problemReports     ProblemReport[]
-  diagnosticSessions DiagnosticSession[]
-  repairRequests     RepairRequest[]
-  bookings           Booking[]
-  payments           Payment[]
-  reviews            Review[]
-  favorites          FavoriteTechnician[]
+  id                 String               @id @default(cuid())
+  userId             String               @unique
+  phone              String?
+  city               String               @default("Addis Ababa")
+  subCity            String?
+  latitude           Float?
+  longitude          Float?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
   aiChats            AIChat[]
+  bookings           Booking[]
+  conversations      Conversation[]
+  equipment          CustomerEquipment[]
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diagnosticSessions DiagnosticSession[]
+  favorites          FavoriteTechnician[]
+  payments           Payment[]
+  problemReports     ProblemReport[]
+  repairRequests     RepairRequest[]
+  reviews            Review[]
+  customerReviews    CustomerReview[]
 }
 
 model TechnicianProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String                  @id @default(cuid())
+  userId            String                  @unique
   displayName       String
   bio               String?
   avatarUrl         String?
   phone             String?
-  yearsExperience   Int      @default(0)
-  completedJobs     Int      @default(0)
-  rating            Float    @default(0)
-  ratingCount       Int      @default(0)
-  responseTimeHours Int      @default(24)
-  completionRate    Float    @default(1.0)
-  cancellationRate  Float    @default(0)
-  baseCallOutFee    Int? // minor units
-  hourlyRate        Int? // minor units
-  verified          Boolean  @default(false)
-  status            String   @default("PENDING") // PENDING | ACTIVE | SUSPENDED
-  availability      String   @default("AVAILABLE") // AVAILABLE | BUSY | OFFLINE
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  skills            TechnicianSkill[]
-  serviceAreas      ServiceAreaAssignment[]
-  matches           TechnicianMatch[]
-  repairRequests    RepairRequest[]
-  quotes            Quote[]
-  bookings          Booking[]
-  reviews           Review[]
+  yearsExperience   Int                     @default(0)
+  completedJobs     Int                     @default(0)
+  rating            Float                   @default(0)
+  ratingCount       Int                     @default(0)
+  responseTimeHours Int                     @default(24)
+  completionRate    Float                   @default(1.0)
+  cancellationRate  Float                   @default(0)
+  baseCallOutFee    Int?
+  hourlyRate        Int?
+  verified          Boolean                 @default(false)
+  status            String                  @default("PENDING")
+  availability      String                  @default("AVAILABLE")
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
   availabilitySlots AvailabilitySlot[]
-  documents         TechnicianDocument[]
+  bookings          Booking[]
+  conversations     Conversation[]
   favorites         FavoriteTechnician[]
+  quotes            Quote[]
+  repairRequests    RepairRequest[]
+  reviews           Review[]
+  customerReviews   CustomerReview[]
+  serviceAreas      ServiceAreaAssignment[]
+  documents         TechnicianDocument[]
   earnings          TechnicianEarnings?
+  matches           TechnicianMatch[]
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills            TechnicianSkill[]
 }
 
 model TechnicianSkill {
   id                String            @id @default(cuid())
   technicianId      String
-  technician        TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  skill             String // e.g. "appliance_repair"
-  equipmentCategory String? // category slug
-  proficiency       Int               @default(3) // 1-5
+  skill             String
+  equipmentCategory String?
+  proficiency       Int               @default(3)
   createdAt         DateTime          @default(now())
+  technician        TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@unique([technicianId, skill, equipmentCategory])
 }
 
 model ServiceArea {
-  id        String @id @default(cuid())
-  name      String @unique // Bole, Kazanchis...
-  city      String @default("Addis Ababa")
-  latitude  Float
-  longitude Float
-  radiusKm  Float  @default(5)
-
+  id          String                  @id @default(cuid())
+  name        String                  @unique
+  city        String                  @default("Addis Ababa")
+  latitude    Float
+  longitude   Float
+  radiusKm    Float                   @default(5)
   assignments ServiceAreaAssignment[]
 }
 
 model ServiceAreaAssignment {
   id            String            @id @default(cuid())
   technicianId  String
-  technician    TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   serviceAreaId String
   serviceArea   ServiceArea       @relation(fields: [serviceAreaId], references: [id], onDelete: Cascade)
+  technician    TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@unique([technicianId, serviceAreaId])
 }
 
-// ──────────────────────────────── Equipment ─────────────────────────────────────
-
 model EquipmentCategory {
-  id          String   @id @default(cuid())
-  slug        String   @unique // washing_machine, refrigerator...
-  name        String
-  icon        String?
-  description String?
-  createdAt   DateTime @default(now())
-
-  models            EquipmentModel[]
-  errorCodes        EquipmentErrorCode[]
-  symptoms          Symptom[]
-  questions         DiagnosticQuestion[]
-  possibleCauses    PossibleCause[]
-  rules             DiagnosticRule[]
+  id                String               @id @default(cuid())
+  slug              String               @unique
+  name              String
+  icon              String?
+  description       String?
+  createdAt         DateTime             @default(now())
   customerEquipment CustomerEquipment[]
+  questions         DiagnosticQuestion[]
+  rules             DiagnosticRule[]
+  errorCodes        EquipmentErrorCode[]
+  models            EquipmentModel[]
+  possibleCauses    PossibleCause[]
   problemReports    ProblemReport[]
+  symptoms          Symptom[]
 }
 
 model EquipmentModel {
   id         String            @id @default(cuid())
   categoryId String
-  category   EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   brand      String
   model      String
   createdAt  DateTime          @default(now())
+  category   EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, brand, model])
 }
@@ -193,117 +185,140 @@ model EquipmentModel {
 model EquipmentErrorCode {
   id                   String            @id @default(cuid())
   categoryId           String
-  category             EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   brand                String?
-  modelPattern         String? // E.g. "GSR*"
+  modelPattern         String?
   code                 String
   meaning              String
-  severity             String            @default("NORMAL") // LOW | NORMAL | HIGH | EMERGENCY
-  riskLevel            String            @default("SAFE") // SAFE | CAUTION | PROFESSIONAL_ONLY
+  severity             String            @default("NORMAL")
+  riskLevel            String            @default("SAFE")
   possibleCauses       String?
   recommendedActions   String?
   professionalRequired Boolean           @default(false)
   createdAt            DateTime          @default(now())
+  category             EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@index([categoryId, code])
 }
 
 model CustomerEquipment {
-  id           String            @id @default(cuid())
-  customerId   String
-  customer     CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  categoryId   String
-  category     EquipmentCategory @relation(fields: [categoryId], references: [id])
-  brand        String?
-  model        String?
-  serialNumber String?
-  nickname     String?
-  purchaseDate DateTime?
-  notes        String?
-  imageUrl     String?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-
-  problemReports     ProblemReport[]
-  diagnosticSessions DiagnosticSession[]
-  maintenanceRecords MaintenanceRecord[]
+  id                  String              @id @default(cuid())
+  customerId          String
+  categoryId          String
+  brand               String?
+  model               String?
+  serialNumber        String?
+  nickname            String?
+  purchaseDate        DateTime?
+  notes               String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  customCategoryName  String?
+  imageUrls           String[]            @default([])
+  category            EquipmentCategory   @relation(fields: [categoryId], references: [id])
+  customer            CustomerProfile     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  diagnosticSessions  DiagnosticSession[]
+  equipmentWarranties EquipmentWarranty[]
+  maintenanceRecords  MaintenanceRecord[]
+  problemReports      ProblemReport[]
 }
 
 model MaintenanceRecord {
   id          String            @id @default(cuid())
   equipmentId String
-  equipment   CustomerEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
   date        DateTime          @default(now())
-  type        String // cleaning, inspection, filter_change...
+  type        String
   description String?
-  cost        Int? // minor units
+  cost        Int?
   createdAt   DateTime          @default(now())
+  equipment   CustomerEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────────────── Problems ──────────────────────────────────────
-
 model ProblemReport {
-  id          String             @id @default(cuid())
-  customerId  String
-  customer    CustomerProfile    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  equipmentId String?
-  equipment   CustomerEquipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
-  categoryId  String
-  category    EquipmentCategory  @relation(fields: [categoryId], references: [id])
-  description String
-  urgency     String             @default("NORMAL") // LOW | NORMAL | HIGH | EMERGENCY
-  status      String             @default("OPEN") // OPEN | DIAGNOSED | ESCALATED | RESOLVED | ARCHIVED
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-
-  media              ProblemMedia[]
+  id                 String              @id @default(cuid())
+  customerId         String
+  equipmentId        String?
+  categoryId         String
+  description        String
+  urgency            String              @default("NORMAL")
+  status             String              @default("OPEN")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  customCategoryName String?
+  customSymptom      String?
+  symptomIds         String[]            @default([])
   diagnosticSessions DiagnosticSession[]
+  media              ProblemMedia[]
+  category           EquipmentCategory   @relation(fields: [categoryId], references: [id])
+  customer           CustomerProfile     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  equipment          CustomerEquipment?  @relation(fields: [equipmentId], references: [id])
   repairRequest      RepairRequest?
 }
 
 model ProblemMedia {
   id        String        @id @default(cuid())
   problemId String
-  problem   ProblemReport @relation(fields: [problemId], references: [id], onDelete: Cascade)
-  url       String // storage key
+  url       String
   fileName  String
   mimeType  String
   sizeBytes Int
-  type      String // image | video
+  type      String
   createdAt DateTime      @default(now())
+  problem   ProblemReport @relation(fields: [problemId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────────── Diagnostic engine ─────────────────────────────────
+model Conversation {
+  id           String            @id @default(cuid())
+  customerId   String
+  technicianId String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  customer     CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@unique([customerId, technicianId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
 
 model Symptom {
-  id          String            @id @default(cuid())
+  id          String               @id @default(cuid())
   categoryId  String
-  category    EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  slug        String // loud_noise_during_spin
+  slug        String
   name        String
   description String?
-  createdAt   DateTime          @default(now())
-
-  questions DiagnosticQuestion[]
+  createdAt   DateTime             @default(now())
+  questions   DiagnosticQuestion[]
+  category    EquipmentCategory    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, slug])
 }
 
 model DiagnosticQuestion {
-  id         String            @id @default(cuid())
+  id         String             @id @default(cuid())
   categoryId String
-  category   EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   symptomId  String?
-  symptom    Symptom?          @relation(fields: [symptomId], references: [id], onDelete: Cascade)
-  key        String // when_does_noise_happen
+  key        String
   text       String
   helpText   String?
-  inputType  String // SINGLE_SELECT | MULTI_SELECT | TEXT | NUMBER | BOOLEAN
-  order      Int               @default(0)
-  required   Boolean           @default(true)
-  createdAt  DateTime          @default(now())
-
-  options DiagnosticOption[]
+  inputType  String
+  order      Int                @default(0)
+  required   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  options    DiagnosticOption[]
+  category   EquipmentCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  symptom    Symptom?           @relation(fields: [symptomId], references: [id], onDelete: Cascade)
 
   @@unique([categoryId, key])
 }
@@ -311,97 +326,90 @@ model DiagnosticQuestion {
 model DiagnosticOption {
   id         String             @id @default(cuid())
   questionId String
-  question   DiagnosticQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  value      String // during_spinning
+  value      String
   label      String
   order      Int                @default(0)
+  question   DiagnosticQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 }
 
-// Rule: if questionKey answered with optionValue (operator), contribute weight to causeId,
-// OR escalate.
 model DiagnosticRule {
   id             String            @id @default(cuid())
   categoryId     String
-  category       EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   symptomId      String?
   questionKey    String
   optionValue    String?
-  operator       String            @default("eq") // eq | ne | contains | any
+  operator       String            @default("eq")
   causeId        String
-  cause          PossibleCause     @relation(fields: [causeId], references: [id], onDelete: Cascade)
   weight         Float             @default(1.0)
   escalate       Boolean           @default(false)
   escalateReason String?
   createdAt      DateTime          @default(now())
+  category       EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  cause          PossibleCause     @relation(fields: [causeId], references: [id], onDelete: Cascade)
 }
 
 model PossibleCause {
-  id                      String            @id @default(cuid())
+  id                      String                @id @default(cuid())
   categoryId              String
-  category                EquipmentCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   slug                    String
   name                    String
   description             String?
-  riskLevel               String            @default("SAFE") // SAFE | CAUTION | PROFESSIONAL_ONLY
-  baseConfidence          Float             @default(0.5)
-  professionalRecommended Boolean           @default(false)
-  createdAt               DateTime          @default(now())
-
-  rules                DiagnosticRule[]
-  troubleshootingSteps TroubleshootingStep[]
-  diagnoses            Diagnosis[]
+  riskLevel               String                @default("SAFE")
+  baseConfidence          Float                 @default(0.5)
+  professionalRecommended Boolean               @default(false)
+  createdAt               DateTime              @default(now())
+  diagnoses               Diagnosis[]
+  rules                   DiagnosticRule[]
+  category                EquipmentCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  troubleshootingSteps    TroubleshootingStep[]
 }
 
 model TroubleshootingStep {
-  id               String        @id @default(cuid())
+  id               String                 @id @default(cuid())
   causeId          String
-  cause            PossibleCause @relation(fields: [causeId], references: [id], onDelete: Cascade)
   title            String
   description      String
-  difficulty       String        @default("EASY") // EASY | MODERATE | ADVANCED
+  difficulty       String                 @default("EASY")
   estimatedMinutes Int
-  safetyLevel      String        @default("SAFE") // SAFE | CAUTION | PROFESSIONAL_ONLY
-  requiredTools    String? // comma separated
+  safetyLevel      String                 @default("SAFE")
+  requiredTools    String?
   instructions     String
   expectedResult   String?
   failureResult    String?
-  order            Int           @default(0)
-  createdAt        DateTime      @default(now())
-
-  results DiagnosticStepResult[]
+  order            Int                    @default(0)
+  createdAt        DateTime               @default(now())
+  results          DiagnosticStepResult[]
+  cause            PossibleCause          @relation(fields: [causeId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────────── Diagnostic sessions ───────────────────────────────
-
 model DiagnosticSession {
-  id                       String             @id @default(cuid())
+  id                       String                 @id @default(cuid())
   customerId               String
-  customer                 CustomerProfile    @relation(fields: [customerId], references: [id], onDelete: Cascade)
   problemId                String?
-  problem                  ProblemReport?     @relation(fields: [problemId], references: [id], onDelete: SetNull)
   equipmentId              String?
-  equipment                CustomerEquipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
   categoryId               String
   symptomId                String?
   symptomSlug              String?
-  status                   String             @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ESCALATED | ABANDONED
+  status                   String                 @default("IN_PROGRESS")
   currentQuestionKey       String?
-  answersJson              String? // JSON { questionKey: string[] }
-  possibleCausesJson       String? // JSON array of {causeId, confidence}
+  answersJson              String?
+  possibleCausesJson       String?
   recommendationJson       String?
   confidence               Float?
-  riskLevel                String? // SAFE | CAUTION | PROFESSIONAL_ONLY
+  riskLevel                String?
   escalationRecommendation String?
-  startedAt                DateTime           @default(now())
+  startedAt                DateTime               @default(now())
   completedAt              DateTime?
-  updatedAt                DateTime           @updatedAt
-
-  answers        DiagnosticAnswer[]
-  diagnoses      Diagnosis[]
-  stepResults    DiagnosticStepResult[]
-  repairRequest  RepairRequest?
-  aiAnalyses     AIAnalysis[]
-  aiInteractions AIInteraction[]
+  updatedAt                DateTime               @updatedAt
+  aiAnalyses               AIAnalysis[]
+  aiInteractions           AIInteraction[]
+  diagnoses                Diagnosis[]
+  answers                  DiagnosticAnswer[]
+  customer                 CustomerProfile        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  equipment                CustomerEquipment?     @relation(fields: [equipmentId], references: [id])
+  problem                  ProblemReport?         @relation(fields: [problemId], references: [id])
+  stepResults              DiagnosticStepResult[]
+  repairRequest            RepairRequest?
 
   @@index([customerId, status])
 }
@@ -409,11 +417,11 @@ model DiagnosticSession {
 model DiagnosticAnswer {
   id           String            @id @default(cuid())
   sessionId    String
-  session      DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   questionKey  String
   questionText String
-  valuesJson   String // JSON string[] of selected option values
+  valuesJson   String
   createdAt    DateTime          @default(now())
+  session      DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, questionKey])
 }
@@ -421,13 +429,13 @@ model DiagnosticAnswer {
 model Diagnosis {
   id         String            @id @default(cuid())
   sessionId  String
-  session    DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   causeId    String
-  cause      PossibleCause     @relation(fields: [causeId], references: [id])
   confidence Float
   reasoning  String
   rank       Int
   createdAt  DateTime          @default(now())
+  cause      PossibleCause     @relation(fields: [causeId], references: [id])
+  session    DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, causeId])
 }
@@ -435,35 +443,32 @@ model Diagnosis {
 model DiagnosticStepResult {
   id          String              @id @default(cuid())
   sessionId   String
-  session     DiagnosticSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   stepId      String
-  step        TroubleshootingStep @relation(fields: [stepId], references: [id])
-  status      String // ATTEMPTED | SOLVED | FAILED | SKIPPED
+  status      String
   notes       String?
   attemptedAt DateTime            @default(now())
+  session     DiagnosticSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  step        TroubleshootingStep @relation(fields: [stepId], references: [id])
 }
-
-// ──────────────────────────── Repair lifecycle ──────────────────────────────────
 
 model RepairRequest {
   id            String             @id @default(cuid())
   customerId    String
-  customer      CustomerProfile    @relation(fields: [customerId], references: [id], onDelete: Cascade)
   problemId     String             @unique
-  problem       ProblemReport      @relation(fields: [problemId], references: [id], onDelete: Cascade)
   sessionId     String?            @unique
-  session       DiagnosticSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   technicianId  String?
-  technician    TechnicianProfile? @relation(fields: [technicianId], references: [id], onDelete: SetNull)
-  status        String             @default("OPEN") // OPEN | MATCHED | TECHNICIAN_SELECTED | QUOTED | BOOKED | COMPLETED | CANCELLED
+  status        String             @default("OPEN")
   preferredDate DateTime?
   notes         String?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
-
-  matches TechnicianMatch[]
-  quote   Quote?
-  booking Booking?
+  booking       Booking?
+  quote         Quote?
+  customer      CustomerProfile    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  problem       ProblemReport      @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  session       DiagnosticSession? @relation(fields: [sessionId], references: [id])
+  technician    TechnicianProfile? @relation(fields: [technicianId], references: [id])
+  matches       TechnicianMatch[]
 
   @@index([customerId, status])
   @@index([technicianId, status])
@@ -472,13 +477,13 @@ model RepairRequest {
 model TechnicianMatch {
   id              String            @id @default(cuid())
   repairRequestId String
-  repairRequest   RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
   technicianId    String
-  technician      TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   score           Float
   rank            Int
-  explanationJson String // JSON breakdown
+  explanationJson String
   createdAt       DateTime          @default(now())
+  repairRequest   RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
+  technician      TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@unique([repairRequestId, technicianId])
 }
@@ -486,9 +491,7 @@ model TechnicianMatch {
 model Quote {
   id                     String            @id @default(cuid())
   repairRequestId        String            @unique
-  repairRequest          RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
   technicianId           String
-  technician             TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   inspectionFee          Int               @default(0)
   labor                  Int               @default(0)
   partsTotal             Int               @default(0)
@@ -499,116 +502,116 @@ model Quote {
   estimatedDurationHours Int?
   expiresAt              DateTime?
   warrantyMonths         Int?
-  status                 String            @default("SUBMITTED") // SUBMITTED | APPROVED | REJECTED | EXPIRED
+  status                 String            @default("SUBMITTED")
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
-
-  items   QuoteItem[]
-  booking Booking?
+  booking                Booking?
+  repairRequest          RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
+  technician             TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  items                  QuoteItem[]
 }
 
 model QuoteItem {
   id          String @id @default(cuid())
   quoteId     String
-  quote       Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   description String
   quantity    Int    @default(1)
   unitPrice   Int
   total       Int
+  quote       Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 }
 
 model Booking {
   id              String            @id @default(cuid())
   repairRequestId String            @unique
-  repairRequest   RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
   customerId      String
-  customer        CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   technicianId    String
-  technician      TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   quoteId         String?           @unique
-  quote           Quote?            @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   scheduledAt     DateTime
   location        String
   notes           String?
-  status          String            @default("REQUESTED") // REQUESTED | ACCEPTED | SCHEDULED | CONFIRMED | CANCELLED | COMPLETED
+  status          String            @default("REQUESTED")
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
-
-  repairJob   RepairJob?
-  payment     Payment?
-  appointment Appointment?
+  appointment     Appointment?
+  customer        CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quote           Quote?            @relation(fields: [quoteId], references: [id])
+  repairRequest   RepairRequest     @relation(fields: [repairRequestId], references: [id], onDelete: Cascade)
+  technician      TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+  payment         Payment?
+  repairJob       RepairJob?
 
   @@index([customerId, status])
   @@index([technicianId, status])
 }
 
 model RepairJob {
-  id            String    @id @default(cuid())
-  bookingId     String    @unique
-  booking       Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  status        String    @default("SCHEDULED")
-  // SCHEDULED | EN_ROUTE | ARRIVED | INSPECTING | DIAGNOSING | QUOTE_SUBMITTED
-  // | AWAITING_APPROVAL | REPAIRING | COMPLETED | CANCELLED
+  id            String                   @id @default(cuid())
+  bookingId     String                   @unique
+  status        String                   @default("SCHEDULED")
   diagnosis     String?
   workPerformed String?
   startedAt     DateTime?
   completedAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  statusHistory RepairStatusHistory[]
-  parts         RepairPart[]
-  warranty      Warranty?
-  review        Review?
-  locationPings TechnicianLocationPing[]
-  inspection    RepairInspection?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
   dispute       Dispute?
+  inspection    RepairInspection?
+  booking       Booking                  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  parts         RepairPart[]
+  statusHistory RepairStatusHistory[]
+  review        Review?
+  customerReview CustomerReview?
+  locationPings TechnicianLocationPing[]
+  warranty      Warranty?
 }
 
 model RepairStatusHistory {
   id        String    @id @default(cuid())
   jobId     String
-  job       RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   status    String
   note      String?
   createdAt DateTime  @default(now())
+  job       RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 model RepairPart {
   id         String    @id @default(cuid())
   jobId      String
-  job        RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   name       String
   partNumber String?
   quantity   Int       @default(1)
   unitCost   Int
   totalCost  Int
+  job        RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
-  id          String          @id @default(cuid())
-  bookingId   String          @unique
-  booking     Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  customerId  String
-  customer    CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  amount      Int
-  currency    String          @default("ETB")
-  status      String          @default("PENDING") // PENDING | SUCCEEDED | FAILED | REFUNDED
-  provider    String          @default("mock")
-  providerRef String?
-  createdAt   DateTime        @default(now())
-  paidAt      DateTime?
+  id                        String          @id @default(cuid())
+  bookingId                 String          @unique
+  customerId                String
+  amount                    Int
+  currency                  String          @default("ETB")
+  status                    String          @default("PENDING")
+  provider                  String          @default("mock")
+  createdAt                 DateTime        @default(now())
+  paidAt                    DateTime?
+  failedAt                  DateTime?
+  failureReason             String?
+  metadataJson              String?
+  providerCheckoutSessionId String?
+  providerPaymentId         String?
+  refundedAt                DateTime?
+  booking                   Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer                  CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
 }
 
 model Review {
   id                    String            @id @default(cuid())
   jobId                 String            @unique
-  job                   RepairJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
   customerId            String
-  customer              CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   technicianId          String
-  technician            TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  rating                Int // 1-5
+  rating                Int
   title                 String?
   body                  String?
   qualityRating         Int?
@@ -616,140 +619,139 @@ model Review {
   communicationRating   Int?
   valueRating           Int?
   createdAt             DateTime          @default(now())
+  customer              CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  job                   RepairJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  technician            TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@index([technicianId])
 }
 
+model CustomerReview {
+  id                    String            @id @default(cuid())
+  jobId                 String            @unique
+  customerId            String
+  technicianId          String
+  rating                Int
+  title                 String?
+  body                  String?
+  createdAt             DateTime          @default(now())
+  customer              CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  job                   RepairJob         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  technician            TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
 model Warranty {
-  id             String    @id @default(cuid())
-  jobId          String    @unique
-  job            RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  startDate      DateTime  @default(now())
+  id             String          @id @default(cuid())
+  jobId          String          @unique
+  startDate      DateTime        @default(now())
   endDate        DateTime
   durationMonths Int
   coveredWork    String
-  status         String    @default("ACTIVE") // ACTIVE | EXPIRED | VOIDED
-  createdAt      DateTime  @default(now())
-
-  claims WarrantyClaim[]
+  status         String          @default("ACTIVE")
+  createdAt      DateTime        @default(now())
+  documentUrl    String?
+  job            RepairJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  claims         WarrantyClaim[]
 }
 
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String // booking_accepted | quote_submitted | ...
+  type      String
   title     String
   body      String
   dataJson  String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, read])
 }
 
-// ──────────────────────────── Phase 2: AI layer ────────────────────────────────
-
-// A single AI analysis record — one provider call, one structured result.
-// Linked to a diagnostic session for auditability.
 model AIAnalysis {
   id               String             @id @default(cuid())
   sessionId        String?
-  session          DiagnosticSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   customerId       String
-  requestType      String // interpret_problem | clarify | explain_step | analyze_image | technician_brief | repair_summary | match_explain
+  requestType      String
   provider         String             @default("zai")
   model            String?
-  // Structured result (validated by Zod). Null if validation failed.
   resultJson       String?
-  // Whether FixIt accepted or rejected the AI result after safety validation.
   accepted         Boolean            @default(true)
   rejectionReason  String?
-  // Safety gate decision.
-  safetyDecision   String             @default("PASS") // PASS | DOWNGRADED | REJECTED | ESCALATE
-  // Confidence reported by the AI (0..1).
+  safetyDecision   String             @default("PASS")
   confidence       Float?
-  // Whether FixIt fell back to deterministic logic after this call.
   fellBack         Boolean            @default(false)
   fallbackReason   String?
   latencyMs        Int?
   tokensUsed       Int?
   estimatedCostUsd Float?             @default(0)
   createdAt        DateTime           @default(now())
-
-  messages     AIInteraction[]
-  observations AIObservation[]
-  hypotheses   AIHypothesis[]
+  session          DiagnosticSession? @relation(fields: [sessionId], references: [id])
+  hypotheses       AIHypothesis[]
+  messages         AIInteraction[]
+  observations     AIObservation[]
 
   @@index([sessionId])
   @@index([customerId])
   @@index([requestType])
 }
 
-// Individual conversation messages within an AI-assisted session.
 model AIInteraction {
   id             String            @id @default(cuid())
   sessionId      String
-  session        DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   analysisId     String?
-  analysis       AIAnalysis?       @relation(fields: [analysisId], references: [id], onDelete: SetNull)
-  role           String // user | assistant | system
+  role           String
   content        String
-  // Structured data extracted from this message (e.g. extracted symptoms).
   structuredJson String?
   createdAt      DateTime          @default(now())
+  analysis       AIAnalysis?       @relation(fields: [analysisId], references: [id])
+  session        DiagnosticSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
 }
 
-// A visual observation from image analysis.
 model AIObservation {
   id              String     @id @default(cuid())
   analysisId      String
-  analysis        AIAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
   mediaId         String?
-  observationType String // OBSERVED | INFERRED | UNKNOWN
+  observationType String
   description     String
-  // Optional extracted data (error code, model number, visible damage).
-  extractedData   String? // JSON
+  extractedData   String?
   createdAt       DateTime   @default(now())
+  analysis        AIAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 }
 
-// A diagnostic hypothesis generated by AI.
 model AIHypothesis {
   id                    String     @id @default(cuid())
   analysisId            String
-  analysis              AIAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
   causeName             String
   explanation           String
   confidence            Float
-  safetyLevel           String     @default("SAFE") // SAFE | CAUTION | PROFESSIONAL_ONLY
-  supportingEvidence    String? // JSON array
-  contradictingEvidence String? // JSON array
+  safetyLevel           String     @default("SAFE")
+  supportingEvidence    String?
+  contradictingEvidence String?
   requiredVerification  String?
-  // Whether FixIt's deterministic engine could verify this hypothesis against
-  // known causes. Unverified hypotheses are shown as uncertain.
   verified              Boolean    @default(false)
   matchedCauseId        String?
   createdAt             DateTime   @default(now())
+  analysis              AIAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────────── AI Chat History ──────────────────────────────
-// Stores lightweight chat history before a DiagnosticSession is created.
 model AIChat {
   id                  String          @id @default(cuid())
   customerId          String
-  customer            CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
   title               String          @default("New Diagnosis")
-  messagesJson        String          @default("[]") // JSON array of Message objects
+  messagesJson        String          @default("[]")
   diagnosticSessionId String?         @unique
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
+  customer            CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId, updatedAt])
 }
 
-// Aggregate usage tracking for cost control + admin analytics.
 model AIUsageRecord {
   id               String   @id @default(cuid())
   userId           String
@@ -757,7 +759,7 @@ model AIUsageRecord {
   requestType      String
   provider         String
   model            String?
-  status           String // SUCCESS | FAILED | TIMEOUT | VALIDATION_FAILED | FALLBACK
+  status           String
   latencyMs        Int?
   tokensUsed       Int?
   estimatedCostUsd Float?   @default(0)
@@ -767,104 +769,91 @@ model AIUsageRecord {
   @@index([requestType, createdAt])
 }
 
-// ──────────────────────────── Phase 3: Operational layer ───────────────────────
-
-// Technician availability slots — real availability, not hardcoded.
-// A slot represents a time window the technician is available for bookings.
 model AvailabilitySlot {
   id           String            @id @default(cuid())
   technicianId String
-  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  // Day of week 0=Sunday .. 6=Saturday, OR a specific date for one-off blocks.
-  dayOfWeek    Int? // 0-6 for recurring weekly slots
-  specificDate DateTime? // for one-off availability or blocks (date only, time in startMinutes/endMinutes)
-  startMinutes Int // minutes from midnight (e.g. 540 = 9:00 AM)
-  endMinutes   Int // minutes from midnight (e.g. 1020 = 5:00 PM)
-  isBlock      Boolean           @default(false) // true = unavailable period, false = available slot
+  dayOfWeek    Int?
+  specificDate DateTime?
+  startMinutes Int
+  endMinutes   Int
+  isBlock      Boolean           @default(false)
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@index([technicianId, dayOfWeek])
   @@index([technicianId, specificDate])
 }
 
-// Appointment — the scheduled date/time for a booking. Separated from Booking
-// so reschedules are tracked without losing history.
 model Appointment {
-  id          String    @id @default(cuid())
-  bookingId   String    @unique
-  booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  id          String                  @id @default(cuid())
+  bookingId   String                  @unique
   scheduledAt DateTime
   endsAt      DateTime?
-  status      String    @default("REQUESTED") // REQUESTED | CONFIRMED | RESCHEDULED | CANCELLED | COMPLETED
-  proposedBy  String? // userId who proposed this time
+  status      String                  @default("REQUESTED")
+  proposedBy  String?
   notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  history AppointmentReschedule[]
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  booking     Booking                 @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  history     AppointmentReschedule[]
 }
 
 model AppointmentReschedule {
   id            String      @id @default(cuid())
   appointmentId String
-  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
   previousTime  DateTime
   newTime       DateTime
-  proposedBy    String // userId
+  proposedBy    String
   reason        String?
   createdAt     DateTime    @default(now())
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 }
 
-// Technician location ping — privacy-conscious. Only stored during active
-// service windows (EN_ROUTE → ARRIVED). Deleted or voided after job completion.
 model TechnicianLocationPing {
   id         String    @id @default(cuid())
   jobId      String
-  job        RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   latitude   Float
   longitude  Float
   etaMinutes Int?
-  isDemo     Boolean   @default(true) // Phase 3: no real GPS — clearly marked demo
+  isDemo     Boolean   @default(true)
   createdAt  DateTime  @default(now())
+  job        RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId, createdAt])
 }
 
-// Structured technician inspection — recorded during the INSPECTING phase.
 model RepairInspection {
   id                String    @id @default(cuid())
   jobId             String    @unique
-  job               RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
   observedIssue     String?
   physicalCondition String?
-  diagnosticChecks  String? // JSON array of {check, result}
-  errorCodes        String? // JSON array of strings
-  suspectedParts    String? // JSON array
-  safetyConcerns    String? // JSON array
+  diagnosticChecks  String?
+  errorCodes        String?
+  suspectedParts    String?
+  safetyConcerns    String?
   notes             String?
-  photosJson        String? // JSON array of media keys
+  photosJson        String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  job               RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
-// Dispute — customer can open, technician responds, admin resolves.
 model Dispute {
-  id           String    @id @default(cuid())
-  jobId        String    @unique
-  job          RepairJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  id           String           @id @default(cuid())
+  jobId        String           @unique
   customerId   String
   technicianId String
-  reason       String // repair_quality | unexpected_charge | incomplete_work | other
+  reason       String
   description  String
-  status       String    @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED | REJECTED
+  status       String           @default("OPEN")
   resolution   String?
-  resolvedBy   String? // admin userId
-  refundAmount Int? // minor units, if refund issued
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  messages DisputeMessage[]
+  resolvedBy   String?
+  refundAmount Int?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  job          RepairJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  messages     DisputeMessage[]
 
   @@index([status])
   @@index([customerId])
@@ -874,50 +863,47 @@ model Dispute {
 model DisputeMessage {
   id         String   @id @default(cuid())
   disputeId  String
-  dispute    Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
-  authorId   String // userId
-  authorRole String // customer | technician | admin
+  authorId   String
+  authorRole String
   message    String
   createdAt  DateTime @default(now())
+  dispute    Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
 
   @@index([disputeId, createdAt])
 }
 
-// Warranty claim — customer can claim against an active warranty.
 model WarrantyClaim {
   id          String   @id @default(cuid())
   warrantyId  String
-  warranty    Warranty @relation(fields: [warrantyId], references: [id], onDelete: Cascade)
   customerId  String
   description String
-  status      String   @default("OPEN") // OPEN | APPROVED | REJECTED | RESOLVED
+  status      String   @default("OPEN")
   resolution  String?
-  resolvedBy  String? // admin or technician userId
+  resolvedBy  String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  warranty    Warranty @relation(fields: [warrantyId], references: [id], onDelete: Cascade)
 
   @@index([warrantyId])
   @@index([status])
 }
 
-// Technician verification documents — submitted by tech, reviewed by admin.
 model TechnicianDocument {
   id           String            @id @default(cuid())
   technicianId String
-  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  type         String // identity | certification | insurance | other
+  type         String
   fileName     String
   storageKey   String
-  status       String            @default("PENDING") // PENDING | APPROVED | REJECTED
-  reviewedBy   String? // admin userId
+  status       String            @default("PENDING")
+  reviewedBy   String?
   reviewNote   String?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@index([technicianId, status])
 }
 
-// Notification preferences — users control which notifications they receive.
 model NotificationPreference {
   id                   String   @id @default(cuid())
   userId               String   @unique
@@ -932,27 +918,25 @@ model NotificationPreference {
   updatedAt            DateTime @updatedAt
 }
 
-// Favorite technicians — customers can bookmark technicians.
 model FavoriteTechnician {
   id           String            @id @default(cuid())
   customerId   String
-  customer     CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   technicianId String
-  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
   createdAt    DateTime          @default(now())
+  customer     CustomerProfile   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  technician   TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, technicianId])
 }
 
-// Audit log — important administrative and workflow actions.
 model AuditLog {
   id           String   @id @default(cuid())
-  actorId      String? // userId, null for system
-  actorRole    String? // CUSTOMER | TECHNICIAN | ADMIN | SYSTEM
-  action       String // e.g. "technician_verified", "dispute_resolved", "payment_captured"
-  entityType   String // booking | repair_job | quote | payment | dispute | technician | user
+  actorId      String?
+  actorRole    String?
+  action       String
+  entityType   String
   entityId     String?
-  metadataJson String? // safe metadata, no secrets
+  metadataJson String?
   createdAt    DateTime @default(now())
 
   @@index([actorId, createdAt])
@@ -960,30 +944,26 @@ model AuditLog {
   @@index([action, createdAt])
 }
 
-// Technician earnings — aggregate for dashboard + admin.
 model TechnicianEarnings {
   id                String            @id @default(cuid())
   technicianId      String            @unique
-  technician        TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
-  totalEarnings     Int               @default(0) // minor units
+  totalEarnings     Int               @default(0)
   pendingPayouts    Int               @default(0)
   completedPayouts  Int               @default(0)
   jobsThisMonth     Int               @default(0)
   earningsThisMonth Int               @default(0)
   updatedAt         DateTime          @updatedAt
+  technician        TechnicianProfile @relation(fields: [technicianId], references: [id], onDelete: Cascade)
 }
 
-// ──────────────────────────── Phase 5: Production ──────────────────────────────
-
-// Idempotency keys — prevent duplicate operations from retried requests.
 model IdempotencyKey {
   id             String   @id @default(cuid())
   key            String   @unique
   userId         String
-  operation      String // booking_create | payment_create | payment_capture | dispute_create | warranty_claim
-  requestHash    String // hash of request body to detect different requests with same key
+  operation      String
+  requestHash    String
   responseStatus Int      @default(200)
-  responseJson   String? // cached response for idempotent replay
+  responseJson   String?
   createdAt      DateTime @default(now())
   expiresAt      DateTime
 
@@ -991,14 +971,13 @@ model IdempotencyKey {
   @@index([expiresAt])
 }
 
-// Payment webhook events — idempotent webhook processing.
 model PaymentWebhookEvent {
   id          String    @id @default(cuid())
-  provider    String // stripe | chapa | mock
-  eventId     String    @unique // provider's event ID
-  eventType   String // payment_intent.succeeded | charge.refunded | etc.
-  payloadHash String // hash of raw payload for dedup
-  status      String    @default("PENDING") // PENDING | PROCESSED | FAILED
+  provider    String
+  eventId     String    @unique
+  eventType   String
+  payloadHash String
+  status      String    @default("PENDING")
   processedAt DateTime?
   error       String?
   createdAt   DateTime  @default(now())
@@ -1007,21 +986,36 @@ model PaymentWebhookEvent {
   @@index([status])
 }
 
-// Outbox events — reliable async processing (email, notifications, webhooks).
 model OutboxEvent {
   id            String    @id @default(cuid())
-  type          String // email | notification | webhook | analytics
-  aggregateType String // booking | payment | dispute | etc.
+  type          String
+  aggregateType String
   aggregateId   String?
-  payload       String // JSON
-  status        String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  payload       String
+  status        String    @default("PENDING")
   attempts      Int       @default(0)
   maxAttempts   Int       @default(3)
   availableAt   DateTime  @default(now())
   processedAt   DateTime?
   lastError     String?
   createdAt     DateTime  @default(now())
+  failedAt      DateTime?
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   @@index([status, availableAt])
+  @@index([createdAt])
   @@index([type, status])
+}
+
+model EquipmentWarranty {
+  id          String            @id @default(cuid())
+  equipmentId String
+  provider    String
+  startDate   DateTime
+  endDate     DateTime
+  notes       String?
+  receiptUrl  String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  equipment   CustomerEquipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
 }

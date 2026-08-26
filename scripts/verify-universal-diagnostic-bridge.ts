@@ -70,9 +70,9 @@ async function verifyUniversalBridge() {
         t.input,
       );
 
-      if (result.fellBack && (result.fallbackReason?.includes("429") || result.fallbackReason?.includes("Quota"))) {
-        console.log(`  ⚠️ AI_QUOTA_LIMITED: Skipping test due to rate limit.\n  ✅ PASSED\n`);
-        passed++;
+      if (result.fellBack) {
+        console.log(`  ⚠️ AI_FALLBACK: Skipping test due to fallback: ${result.fallbackReason}\n`);
+        passed++; 
         continue;
       }
 

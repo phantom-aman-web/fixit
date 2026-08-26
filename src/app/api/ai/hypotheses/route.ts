@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     if (!session || session.customerId !== profile.id) throw new HttpError(403, "Not your session");
 
     const result = await generateHypotheses(
-      profile.userId,
+      profile.id,
       parsed.sessionId,
       parsed.context,
       session.categoryId,

@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (!step) throw new HttpError(404, "Step not found");
 
     const result = await explainTroubleshootingStep(
-      profile.userId,
+      profile.id,
       parsed.sessionId,
       { title: step.title, description: step.description, instructions: step.instructions },
       step.cause?.name ?? "",

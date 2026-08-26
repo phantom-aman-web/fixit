@@ -34,6 +34,7 @@ import {
   LoadingState,
   PageContainer,
   PageHeader,
+  FormSkeleton,
 } from "@/components/shared/states";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -55,6 +57,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useApi, useApiMutation } from "@/hooks/use-api";
 import { navigate, useRouter } from "@/store/router";
+import { ContextualSearch, type SearchResultItem } from "@/components/search/contextual-search";
+import { scoreItem } from "@/lib/search/ranking";
 
 // ───────────────────────────── Types ─────────────────────────────
 
@@ -139,6 +143,8 @@ export function DiagnoseScreen() {
   const isAuthed = status === "authenticated";
   
   const [step, setStep] = useState<"intake" | "analyzing" | "confirm" | "manual">("intake");
+  const router = useRouter();
+  const technicianId = router.route.query.technicianId as string | undefined;
   
   // Intake state
   const [problemText, setProblemText] = useState("");
@@ -148,33 +154,49 @@ export function DiagnoseScreen() {
   
   // Manual / Confirm state
   const [manualCategorySlug, setManualCategorySlug] = useState<string>("");
+  const [manualCustomCategory, setManualCustomCategory] = useState<string>("");
   const [manualType, setManualType] = useState<string>("");
   const [manualBrand, setManualBrand] = useState<string>("");
   const [manualModel, setManualModel] = useState<string>("");
-  const [manualSymptomId, setManualSymptomId] = useState<string>("");
+  const [manualSymptomIds, setManualSymptomIds] = useState<string[]>([]);
+  const [manualCustomSymptom, setManualCustomSymptom] = useState<string>("");
 
   const categoriesApi = useApi<{ categories: Category[] }>(
     ["equipment-categories"],
-    "/api/equipment-categories"
+    "/api/equipment-categories",
+    { staleTime: 24 * 60 * 60 * 1000 }
   );
   
-  const categories = categoriesApi.data?.categories ?? [];
+  const categories = useMemo(() => {
+    const rawList = categoriesApi.data?.categories ?? [];
+    // Create a deep copy to avoid mutating React Query's frozen cache data
+    const list = JSON.parse(JSON.stringify(rawList));
+    
+    if (!list.find((c: any) => c.slug === "other")) {
+      list.push({ id: "other", slug: "other", name: "Other", symptoms: [{ id: "other-symptom", slug: "other-symptom", name: "Other" }] });
+    } else {
+      const otherCat = list.find((c: any) => c.slug === "other");
+      if (otherCat && !otherCat.symptoms.find((s: any) => s.id === "other-symptom")) {
+        otherCat.symptoms.push({ id: "other-symptom", slug: "other-symptom", name: "Other" });
+      }
+    }
+    return list;
+  }, [categoriesApi.data?.categories]);
 
   const interpretMut = useApiMutation<InterpretationResult, { text: string }>(
-    "/api/ai/interpret"
+    "/api/ai/interpret", "POST", []
   );
   const startAiMut = useApiMutation<StartSessionResponse, any>(
-    "/api/ai/start-session"
+    "/api/ai/start-session", "POST", [["history"]]
   );
   const startManualMut = useApiMutation<StartSessionResponse, any>(
-    "/api/diagnostic-sessions"
+    "/api/diagnostic-sessions", "POST", [["history"]]
   );
-  const problemMut = useApiMutation<any, any>("/api/problems");
-
+  const problemMut = useApiMutation<any, any>("/api/problems", "POST", [["history"]]);
   if (status === "loading") {
     return (
       <PageContainer>
-        <LoadingState label="Loading…" />
+        <FormSkeleton />
       </PageContainer>
     );
   }
@@ -222,7 +244,7 @@ export function DiagnoseScreen() {
         analysisId: analysis.analysisId,
       });
       toast.success("Diagnostic session started.");
-      navigate(`diagnose/session/${res.sessionId}`);
+      navigate(`diagnose/session/${res.sessionId}${technicianId ? `?technicianId=${technicianId}` : ""}`);
     } catch (e: any) {
       toast.error(e.message || "Failed to start session.");
     }
@@ -234,26 +256,28 @@ export function DiagnoseScreen() {
       return;
     }
     const cat = categories.find((c) => c.slug === manualCategorySlug);
-    const sId = manualSymptomId || cat?.symptoms[0]?.id;
-    if (!cat || !sId) {
-      toast.error("Please select a symptom.");
+    if (!cat || manualSymptomIds.length === 0) {
+      toast.error("Please select at least one symptom.");
       return;
     }
     try {
       const problemRes = await problemMut.mutateAsync({
         categoryId: cat.id,
+        customCategoryName: manualCategorySlug === "other" ? manualCustomCategory : undefined,
+        customSymptom: manualSymptomIds.includes("other-symptom") ? manualCustomSymptom : undefined,
+        symptomIds: manualSymptomIds,
         description: problemText || "Manual intake",
         urgency: "NORMAL",
       });
       const res = await startManualMut.mutateAsync({
         categoryId: cat.id,
-        symptomId: sId,
+        symptomId: manualSymptomIds[0], // Initialize engine with first selected root
         problemId: problemRes.problem.id,
       });
       const sid = (res.state as any)?.session?.id;
       if (!sid) throw new Error("Could not start session");
       toast.success("Diagnostic session started.");
-      navigate(`diagnose/session/${sid}`);
+      navigate(`diagnose/session/${sid}${technicianId ? `?technicianId=${technicianId}` : ""}`);
     } catch (e: any) {
       toast.error(e.message || "Failed to start session.");
     }
@@ -441,41 +465,95 @@ export function DiagnoseScreen() {
                 <CardContent className="pt-6 space-y-4">
                   <div className="space-y-2">
                     <Label>Category</Label>
-                    <Select value={manualCategorySlug} onValueChange={setManualCategorySlug}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((c) => {
-                          const Icon = categoryIcon(c.icon || c.slug);
-                          return (
-                            <SelectItem key={c.id} value={c.slug}>
-                              <div className="flex items-center gap-2">
-                                <Icon className="h-4 w-4 text-muted-foreground" />
-                                <span>{c.name}</span>
-                              </div>
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
+                    <ContextualSearch
+                      queryKey="category-search"
+                      placeholder="Search categories (e.g. Refrigerator)"
+                      onSearch={async (q) => {
+                        const results: SearchResultItem[] = [];
+                        for (const c of categories) {
+                          const score = scoreItem(q, [
+                            { name: "name", value: c.name, weight: 10.0 },
+                            { name: "slug", value: c.slug, weight: 5.0 },
+                            { name: "desc", value: c.description, weight: 1.0 },
+                          ]);
+                          if (score.score > 0) {
+                            results.push({
+                              id: c.slug,
+                              title: c.name,
+                              subtitle: c.description || undefined,
+                              score: score.score
+                            });
+                          }
+                        }
+                        return results.sort((a, b) => (b.score || 0) - (a.score || 0));
+                      }}
+                      onSelect={(item) => {
+                        setManualCategorySlug(item.id);
+                        setManualSymptomIds([]);
+                      }}
+                    />
+                    
+                    {manualCategorySlug && (
+                      <div className="mt-2 text-sm text-primary font-medium flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4" /> Selected: {categories.find(c => c.slug === manualCategorySlug)?.name}
+                      </div>
+                    )}
                   </div>
+                  
+                  {manualCategorySlug === "other" && (
+                    <div className="space-y-2">
+                      <Label>Custom Category Name</Label>
+                      <Input value={manualCustomCategory} onChange={(e) => setManualCustomCategory(e.target.value)} placeholder="e.g. Hoverboard" />
+                    </div>
+                  )}
 
                   {manualCategorySlug && (
-                    <div className="space-y-2">
-                      <Label>Primary Symptom (Optional)</Label>
-                      <Select value={manualSymptomId} onValueChange={setManualSymptomId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="General issue" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categories.find(c => c.slug === manualCategorySlug)?.symptoms.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
+                    <div className="space-y-3">
+                      <Label>What's wrong? (Select all that apply)</Label>
+                      <div className="grid gap-3">
+                        {categories.find(c => c.slug === manualCategorySlug)?.symptoms.map((s) => (
+                          <div key={s.id} className="flex items-center space-x-2">
+                            <Checkbox 
+                              id={`symptom-${s.id}`} 
+                              checked={manualSymptomIds.includes(s.id)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setManualSymptomIds(prev => [...prev, s.id]);
+                                } else {
+                                  setManualSymptomIds(prev => prev.filter(id => id !== s.id));
+                                }
+                              }}
+                            />
+                            <Label htmlFor={`symptom-${s.id}`} className="font-normal cursor-pointer text-base">
                               {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                            </Label>
+                          </div>
+                        ))}
+                        <div className="flex items-center space-x-2">
+                          <Checkbox 
+                            id="symptom-other" 
+                            checked={manualSymptomIds.includes("other-symptom")}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setManualSymptomIds(prev => [...prev, "other-symptom"]);
+                              } else {
+                                setManualSymptomIds(prev => prev.filter(id => id !== "other-symptom"));
+                                setManualCustomSymptom("");
+                              }
+                            }}
+                          />
+                          <Label htmlFor="symptom-other" className="font-normal cursor-pointer text-base">
+                            Other
+                          </Label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {manualSymptomIds.includes("other-symptom") && (
+                    <div className="space-y-2">
+                      <Label>Custom Symptom</Label>
+                      <Input value={manualCustomSymptom} onChange={(e) => setManualCustomSymptom(e.target.value)} placeholder="Describe the symptom briefly" />
                     </div>
                   )}
 

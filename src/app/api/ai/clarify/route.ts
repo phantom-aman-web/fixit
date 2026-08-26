@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const knowledgeStr = formatKnowledgeForPrompt(knowledge);
 
     const result = await generateClarifyingQuestion(
-      profile.userId,
+      profile.id,
       parsed.sessionId,
       parsed.context,
       knowledgeStr,

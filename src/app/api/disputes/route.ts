@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { ok, apiError, requireAuth, requireCustomerProfile, HttpError } from "@/lib/api";
+import { notify } from "@/services/notifications";
 import { auditLog } from "@/services/audit-service";
 import { checkGeneralRateLimit } from "@/lib/rate-limit";
 
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
     const disputes = await db.dispute.findMany({
       where,
       include: {
-        job: { include: { booking: { include: { technician: true, customer: { include: { user: true } } } } } },
+        job: { include: { booking: { include: { technician: true, customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } } } } } },
         messages: { orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
@@ -87,20 +88,17 @@ export async function POST(req: NextRequest) {
       metadata: { jobId: parsed.jobId, reason: parsed.reason },
     });
 
-    // Notify technician.
+    // Notify technician via the central notification service.
     const tech = await db.technicianProfile.findUnique({
       where: { id: job.booking.technicianId },
-      include: { user: true },
     });
     if (tech) {
-      await db.notification.create({
-        data: {
-          userId: tech.userId,
-          type: "dispute_created",
-          title: "A dispute has been opened",
-          body: `A customer has opened a dispute regarding job ${parsed.jobId.slice(-6)}.`,
-          dataJson: JSON.stringify({ disputeId: dispute.id }),
-        },
+      void notify({
+        userId: tech.userId,
+        type: "dispute_created",
+        title: "A dispute has been opened",
+        body: `A customer has opened a dispute regarding job ${parsed.jobId.slice(-6)}.`,
+        data: { disputeId: dispute.id },
       });
     }
 
@@ -109,3 +107,4 @@ export async function POST(req: NextRequest) {
     return apiError(e);
   }
 }
+

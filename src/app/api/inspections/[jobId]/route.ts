@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { ok, apiError, requireTechnicianProfile, HttpError } from "@/lib/api";
+import { ok, apiError, requireTechnicianProfile, HttpError, requireAuth } from "@/lib/api";
 
 const schema = z.object({
   observedIssue: z.string().max(2000).optional(),
@@ -16,7 +16,7 @@ const schema = z.object({
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ jobId: string }> }) {
   try {
-    const { user, profile } = await requireTechnicianProfile();
+    const user = await requireAuth();
     const { jobId } = await params;
     const job = await db.repairJob.findUnique({
       where: { id: jobId },
@@ -25,9 +25,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ job
     if (!job) throw new HttpError(404, "Job not found");
 
     // Authorization: assigned tech, customer owner, or admin.
-    const isTech = job.booking.technicianId === profile.id;
+    const tech = await db.technicianProfile.findUnique({ where: { userId: user.id } });
+    const isTech = tech && job.booking.technicianId === tech.id;
+    
     const cust = await db.customerProfile.findUnique({ where: { userId: user.id } });
     const isCust = cust && job.booking.customerId === cust.id;
+    
     if (user.role !== "ADMIN" && !isTech && !isCust) throw new HttpError(403, "Not authorized");
 
     return ok({ inspection: job.inspection });

@@ -44,17 +44,19 @@ httpServer.on("request", (req, res) => {
       try {
         const { channel, event, payload } = JSON.parse(body);
         io.to(channel).emit(event, payload);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true }));
+        if (!res.headersSent) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        }
       } catch (e) {
-        res.writeHead(400);
-        res.end("bad request");
+        if (!res.headersSent) {
+          res.writeHead(400);
+          res.end("bad request");
+        }
       }
     });
     return;
   }
-  res.writeHead(404);
-  res.end("not found");
 });
 
 const PORT = 3003;

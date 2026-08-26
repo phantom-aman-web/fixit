@@ -3,7 +3,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { ok, apiError, requireRole, HttpError } from "@/lib/api";
 import { auditLog } from "@/services/audit-service";
-import { payment } from "@/lib/providers/payment";
+import { notify } from "@/services/notifications";
+import { getPaymentProvider } from "@/lib/providers/payment";
 
 const schema = z.object({
   status: z.enum(["RESOLVED", "REJECTED"]),
@@ -47,12 +48,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (pay.status !== "SUCCEEDED") {
         throw new HttpError(400, `Payment is ${pay.status} — cannot refund.`);
       }
-      if (!pay.providerRef) {
+      if (!pay.providerPaymentId) {
         throw new HttpError(500, "Payment has no provider reference — cannot refund.");
       }
 
       try {
-        await payment.refund(pay.providerRef);
+        const paymentProvider = getPaymentProvider();
+        await paymentProvider.refundPayment(pay.providerPaymentId);
         // Atomically update payment + dispute in a transaction.
         refundIssued = true;
       } catch {
@@ -90,19 +92,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       metadata: { status: parsed.status, refundIssued, refundAmount: refundIssued ? parsed.refundAmount : 0 },
     });
 
-    // Notify both parties.
-    const cust = await db.customerProfile.findUnique({ where: { id: dispute.customerId }, include: { user: true } });
-    const tech = await db.technicianProfile.findUnique({ where: { id: dispute.technicianId }, include: { user: true } });
-    for (const u of [cust?.user, tech?.user].filter(Boolean)) {
-      await db.notification.create({
-        data: {
-          userId: u!.id,
-          type: "dispute_updated",
-          title: `Dispute ${parsed.status === "RESOLVED" ? "resolved" : "rejected"}`,
-          body: parsed.resolution || `Your dispute has been ${parsed.status.toLowerCase()}.`,
-          dataJson: JSON.stringify({ disputeId: id }),
-        },
-      });
+    // Notify both parties via the central notification service.
+    const cust = await db.customerProfile.findUnique({ where: { id: dispute.customerId } });
+    const tech = await db.technicianProfile.findUnique({ where: { id: dispute.technicianId } });
+    const notifyTitle = `Dispute ${parsed.status === "RESOLVED" ? "resolved" : "rejected"}`;
+    const notifyBody = parsed.resolution || `Your dispute has been ${parsed.status.toLowerCase()}.`;
+    for (const userId of [cust?.userId, tech?.userId].filter(Boolean) as string[]) {
+      void notify({ userId, type: "dispute_updated", title: notifyTitle, body: notifyBody, data: { disputeId: id } });
     }
 
     return ok({ dispute: updated, refundIssued });

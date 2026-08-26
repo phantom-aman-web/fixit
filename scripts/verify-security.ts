@@ -131,4 +131,6 @@ async function verifySecurity() {
   console.log(`\nVerification Complete: ${passed} PASS, ${failed} FAIL`);
 }
 
-verifySecurity().catch(e => { console.error("Error:", e); process.exit(1); });
+verifySecurity()
+  .catch(e => { console.error("Error:", e); process.exitCode = 1; })
+  .finally(async () => { await db.$disconnect(); });

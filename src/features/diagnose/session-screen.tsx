@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -26,8 +26,8 @@ import {
 } from "lucide-react";
 
 import {
+  DetailSkeleton,
   ErrorState,
-  LoadingState,
   PageContainer,
   PageHeader,
 } from "@/components/shared/states";
@@ -55,7 +55,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useApi, useApiMutation } from "@/hooks/use-api";
-import { navigate } from "@/store/router";
+import { navigate, useRouter } from "@/store/router";
 
 // ───────────────────────────── Types ─────────────────────────────
 
@@ -159,6 +159,9 @@ function formatList(items: string[]): string {
 // ───────────────────────────── Screen ─────────────────────────────
 
 export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
+  const router = useRouter();
+  const technicianId = router.route.query.technicianId as string | undefined;
+
   const stateApi = useApi<FullStateResponse>(
     ["diagnostic-sessions", sessionId],
     `/api/diagnostic-sessions/${sessionId}`
@@ -167,18 +170,18 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
   const answerMut = useApiMutation<
     { state: SessionState },
     { questionKey: string; values: string[] }
-  >(`/api/diagnostic-sessions/${sessionId}/answer`);
+  >(`/api/diagnostic-sessions/${sessionId}/answer`, "POST", [["diagnostic-sessions", sessionId]]);
   const completeMut = useApiMutation<{ state: SessionState }, void>(
-    `/api/diagnostic-sessions/${sessionId}/complete`
+    `/api/diagnostic-sessions/${sessionId}/complete`, "POST", [["diagnostic-sessions", sessionId]]
   );
   const stepMut = useApiMutation<
     { state: SessionState },
     { stepId: string; status: "SOLVED" | "FAILED" | "SKIPPED"; notes?: string }
-  >(`/api/diagnostic-sessions/${sessionId}/step`);
+  >(`/api/diagnostic-sessions/${sessionId}/step`, "POST", [["diagnostic-sessions", sessionId]]);
   const repairMut = useApiMutation<
     RepairRequestResponse,
     { problemId: string; sessionId?: string }
-  >("/api/repair-requests");
+  >("/api/repair-requests", "POST", [["history"]]);
 
   const data = stateApi.data;
   const state = data?.state;
@@ -248,10 +251,24 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
     ? Math.min(100, Math.round(((answeredCount) / totalCount) * 100))
     : 0;
 
+  const isSessionComplete = session?.status === "COMPLETED" || session?.status === "ESCALATED";
+
+  // Auto-complete if there are no questions to ask
+  useEffect(() => {
+    if (totalCount === 0 && !isSessionComplete && !completeMut.isPending && session?.status === "IN_PROGRESS") {
+      completeMut.mutateAsync().then(() => {
+        toast.success("Diagnosis complete.");
+      }).catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "Failed to complete";
+        toast.error(msg);
+      });
+    }
+  }, [totalCount, isSessionComplete, completeMut.isPending, session?.status]);
+
   if (stateApi.isLoading) {
     return (
       <PageContainer>
-        <LoadingState label="Loading diagnostic session…" />
+        <DetailSkeleton />
       </PageContainer>
     );
   }
@@ -273,7 +290,7 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
     );
   }
 
-  const isComplete = session.status === "COMPLETED" || session.status === "ESCALATED";
+  const isComplete = isSessionComplete;
   const solvedResult = stepResults.find((r) => r.status === "SOLVED");
   const allStepsFailed =
     troubleshootingSteps.length > 0 &&
@@ -357,7 +374,11 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
         sessionId,
       });
       toast.success("Repair request created — finding matching technicians.");
-      navigate(`technicians?requestId=${res.request.id}`);
+      if (technicianId) {
+        navigate(`technicians/${technicianId}?requestId=${res.request.id}`);
+      } else {
+        navigate(`technicians?requestId=${res.request.id}`);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to create request";
       toast.error(msg);
@@ -415,7 +436,9 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
               <Card className="mt-4 border-primary/40 bg-primary/5">
                 <CardContent className="flex flex-col items-start gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="font-medium">All questions answered.</p>
+                    <p className="font-medium">
+                      {totalCount === 0 ? "Diagnosis ready." : "All questions answered."}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       We have enough information to give you a diagnosis.
                     </p>
@@ -447,7 +470,9 @@ export function DiagnoseSessionScreen({ sessionId }: { sessionId: string }) {
         <Card className="border-primary/40 bg-primary/5">
           <CardContent className="flex flex-col items-start gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-medium">All questions answered.</p>
+              <p className="font-medium">
+                {totalCount === 0 ? "Diagnosis ready." : "All questions answered."}
+              </p>
               <p className="text-sm text-muted-foreground">
                 We have enough information to give you a diagnosis.
               </p>

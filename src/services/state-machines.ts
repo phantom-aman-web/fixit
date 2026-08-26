@@ -27,8 +27,9 @@ async function realtimeJobStatus(jobId: string, status: string, customerId?: str
 
 const BOOKING_TRANSITIONS: Record<string, string[]> = {
   REQUESTED: ["ACCEPTED", "CANCELLED"],
-  ACCEPTED: ["SCHEDULED", "CANCELLED"],
-  SCHEDULED: ["CONFIRMED", "CANCELLED"],
+  ACCEPTED: ["QUOTE_SUBMITTED", "CANCELLED"],
+  QUOTE_SUBMITTED: ["AWAITING_PAYMENT", "CANCELLED"],
+  AWAITING_PAYMENT: ["CONFIRMED", "CANCELLED"],
   CONFIRMED: ["COMPLETED", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
@@ -38,10 +39,8 @@ const REPAIR_JOB_TRANSITIONS: Record<string, string[]> = {
   SCHEDULED: ["EN_ROUTE", "CANCELLED"],
   EN_ROUTE: ["ARRIVED", "CANCELLED"],
   ARRIVED: ["INSPECTING", "CANCELLED"],
-  INSPECTING: ["DIAGNOSING", "QUOTE_SUBMITTED", "CANCELLED"],
-  DIAGNOSING: ["QUOTE_SUBMITTED", "REPAIRING", "CANCELLED"],
-  QUOTE_SUBMITTED: ["AWAITING_APPROVAL", "CANCELLED"],
-  AWAITING_APPROVAL: ["REPAIRING", "CANCELLED"],
+  INSPECTING: ["DIAGNOSING", "CANCELLED"],
+  DIAGNOSING: ["REPAIRING", "CANCELLED"],
   REPAIRING: ["COMPLETED", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
@@ -66,6 +65,16 @@ export async function transitionBooking(bookingId: string, to: string, note?: st
     where: { id: bookingId },
     data: { status: to },
   });
+  // If booking is confirmed, create the repair job.
+  if (to === "CONFIRMED") {
+    const existingJob = await db.repairJob.findUnique({ where: { bookingId } });
+    if (!existingJob) {
+      await db.repairJob.create({
+        data: { bookingId, status: "SCHEDULED" },
+      });
+    }
+  }
+
   // If booking completes, complete the repair job too.
   if (to === "COMPLETED") {
     const job = await db.repairJob.findUnique({ where: { bookingId } });
@@ -87,6 +96,14 @@ export async function transitionRepairJob(jobId: string, to: string, note?: stri
   await db.repairStatusHistory.create({
     data: { jobId, status: to, note },
   });
+
+  if (to === "COMPLETED") {
+    const booking = await db.booking.findUnique({ where: { id: job.bookingId } });
+    if (booking && canTransition("BOOKING", booking.status, "COMPLETED")) {
+      await transitionBooking(booking.id, "COMPLETED", note);
+    }
+  }
+
   await notifyJobStatus(jobId, to);
   await realtimeJobStatus(jobId, to);
   return updated;

@@ -14,10 +14,11 @@ export async function GET() {
     const recentJobs = await db.repairJob.findMany({
       take: 10,
       orderBy: { createdAt: "desc" },
-      include: { booking: { include: { customer: { include: { user: true } }, technician: true, repairRequest: { include: { problem: { include: { category: true } } } } } } },
+      include: { booking: { include: { customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } }, technician: true, repairRequest: { include: { problem: { include: { category: true } } } } } } },
     });
     return ok({ stats: { users, technicians, jobs, sessions, reviews }, recentJobs });
   } catch (e) {
     return apiError(e);
   }
 }
+

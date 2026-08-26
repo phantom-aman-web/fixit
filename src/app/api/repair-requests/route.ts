@@ -20,7 +20,24 @@ export async function GET() {
         problem: { include: { category: true } },
         session: true,
         technician: true,
-        matches: { include: { technician: true }, orderBy: { rank: "asc" } },
+        matches: { 
+          select: { 
+            id: true, 
+            rank: true, 
+            score: true, 
+            technician: { 
+              select: { 
+                id: true, 
+                displayName: true, 
+                avatarUrl: true,
+                rating: true,
+                ratingCount: true,
+                user: { select: { lastSeenAt: true } }
+              } 
+            } 
+          }, 
+          orderBy: { rank: "asc" } 
+        },
         quote: true,
         booking: { include: { repairJob: true } },
       },

@@ -38,7 +38,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   EmptyState,
   ErrorState,
-  LoadingState,
+  ListSkeleton,
   PageContainer,
   PageHeader,
 } from "@/components/shared/states";
@@ -116,7 +116,7 @@ function AddSlotDialog({ onCreated }: { onCreated: () => void }) {
   const [endTime, setEndTime] = useState("17:00");
   const [submitting, setSubmitting] = useState(false);
 
-  const mutation = useApiMutation("/api/technician/availability", "POST");
+  const mutation = useApiMutation("/api/technician/availability", "POST", [["technician-availability"]]);
 
   const reset = () => {
     setMode("recurring");
@@ -561,7 +561,7 @@ export function AvailabilityScreen() {
     return (
       <PageContainer>
         <PageHeader title="Availability" />
-        <LoadingState label="Loading availability…" />
+        <ListSkeleton />
       </PageContainer>
     );
   }

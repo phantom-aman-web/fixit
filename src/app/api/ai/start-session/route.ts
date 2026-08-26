@@ -60,14 +60,82 @@ export async function POST(req: NextRequest) {
               slug: 'general_issue',
               name: 'General Issue',
             }
+          },
+          questions: {
+            create: [
+              {
+                key: 'issue_duration',
+                text: 'When did this issue first start?',
+                inputType: 'SINGLE_SELECT',
+                order: 1,
+                options: {
+                  create: [
+                    { label: 'Just now', value: 'just_now' },
+                    { label: 'A few days ago', value: 'days_ago' },
+                    { label: 'Weeks ago or more', value: 'weeks_ago' },
+                  ]
+                }
+              },
+              {
+                key: 'power_status',
+                text: 'Does the equipment turn on at all?',
+                inputType: 'SINGLE_SELECT',
+                order: 2,
+                options: {
+                  create: [
+                    { label: 'Yes', value: 'yes' },
+                    { label: 'No', value: 'no' },
+                    { label: 'Sometimes', value: 'sometimes' },
+                  ]
+                }
+              },
+              {
+                key: 'recent_changes',
+                text: 'Were there any recent changes or incidents before this started (e.g. power surge, moved)?',
+                inputType: 'SINGLE_SELECT',
+                order: 3,
+                options: {
+                  create: [
+                    { label: 'Yes', value: 'yes' },
+                    { label: 'No', value: 'no' },
+                    { label: 'Not sure', value: 'not_sure' },
+                  ]
+                }
+              }
+            ]
           }
         },
         include: { symptoms: true },
       });
     }
 
-    const symptom = cat.symptoms[0];
-    if (!symptom) throw new HttpError(400, "No symptoms available for this category");
+    // Try to find a symptom that matches the AI's extracted symptoms or description.
+    let symptom: any = null;
+    const aiSymptoms = parsed.interpretation.symptoms.map(s => s.toLowerCase());
+    
+    for (const s of cat.symptoms) {
+      const sName = s.name.toLowerCase();
+      const sSlug = s.slug.replace(/_/g, ' ').toLowerCase();
+      if (aiSymptoms.some(ais => ais.includes(sName) || ais.includes(sSlug) || sName.includes(ais))) {
+        symptom = s;
+        break;
+      }
+    }
+
+    // If no match, try to use general_issue. If it doesn't exist, create it.
+    if (!symptom) {
+      symptom = cat.symptoms.find(s => s.slug === 'general_issue');
+      if (!symptom) {
+        symptom = await db.symptom.create({
+          data: {
+            categoryId: cat.id,
+            slug: 'general_issue',
+            name: 'General Issue',
+            description: 'General or unclassified issue.',
+          }
+        });
+      }
+    }
 
     // Create a problem report.
     const problem = await db.problemReport.create({

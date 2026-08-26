@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const { profile } = await requireTechnicianProfile();
 
-    const [todayJobs, incomingRequests, activeJobs, awaitingApproval, awaitingParts, completedThisMonth, totalEarningsAgg, monthEarningsAgg] = await Promise.all([
+    const [todayJobs, incomingRequests, activeJobs, awaitingApproval, completedThisMonth, totalCompletedJobs, totalEarningsAgg, monthEarningsAgg] = await Promise.all([
       // Today's appointments
       db.repairJob.findMany({
         where: {
@@ -54,9 +54,8 @@ export async function GET() {
         take: 50,
       }),
       // All completed (for stats)
-      db.repairJob.findMany({
-        where: { booking: { technicianId: profile.id }, status: "COMPLETED" },
-        select: { id: true, completedAt: true },
+      db.booking.count({
+        where: { technicianId: profile.id, status: "COMPLETED" },
       }),
       // Earnings — computed server-side from actual completed jobs with succeeded payments.
       db.payment.aggregate({
@@ -91,7 +90,7 @@ export async function GET() {
         activeJobs,
         awaitingApproval,
         performance: {
-          completedJobs: profile.completedJobs,
+          completedJobs: totalCompletedJobs,
           rating: profile.rating,
           ratingCount: profile.ratingCount,
           jobsThisMonth,

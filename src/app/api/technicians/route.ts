@@ -16,7 +16,10 @@ export async function GET(req: NextRequest) {
       include: {
         skills: true,
         serviceAreas: { include: { serviceArea: true } },
-        reviews: { orderBy: { createdAt: "desc" }, take: 5 },
+        user: { select: { lastSeenAt: true, image: true } },
+        _count: {
+          select: { bookings: { where: { status: "COMPLETED" } } }
+        }
       },
       orderBy: { rating: "desc" },
     });
@@ -30,7 +33,16 @@ export async function GET(req: NextRequest) {
     if (verifiedOnly) filtered = filtered.filter((t) => t.verified);
     if (area) filtered = filtered.filter((t) => t.serviceAreas.some((a) => a.serviceArea.name === area));
 
-    return ok({ technicians: filtered });
+    const mapped = filtered.map((t) => {
+      const { _count, ...rest } = t;
+      return {
+        ...rest,
+        completedJobs: _count.bookings,
+        avatarUrl: t.user.image ? `/api/uploads/${t.user.image}` : null,
+      };
+    });
+
+    return ok({ technicians: mapped });
   } catch (e) {
     return apiError(e);
   }

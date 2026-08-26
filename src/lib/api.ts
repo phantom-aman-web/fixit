@@ -8,6 +8,7 @@ export type SessionUser = {
   id: string;
   email: string;
   name?: string | null;
+  image?: string | null;
   role: "CUSTOMER" | "TECHNICIAN" | "ADMIN";
 };
 
@@ -63,7 +64,7 @@ export async function requireCustomerProfile() {
   return { user: u, profile };
 }
 
-export async function requireTechnicianProfile() {
+export async function requireTechnicianProfile(options?: { allowPending?: boolean }) {
   const u = await requireRole("TECHNICIAN", "ADMIN");
   let profile = await db.technicianProfile.findUnique({ where: { userId: u.id } });
   
@@ -85,7 +86,7 @@ export async function requireTechnicianProfile() {
   }
   // A PENDING or SUSPENDED technician must not perform technician operations.
   // Admins bypass this.
-  if (u.role !== "ADMIN" && profile.status !== "ACTIVE") {
+  if (u.role !== "ADMIN" && profile.status !== "ACTIVE" && !options?.allowPending) {
     throw new HttpError(403, "Your technician account is not yet approved");
   }
   return { user: u, profile };
@@ -115,6 +116,18 @@ export function apiError(err: unknown) {
 
 export function ok<T>(data: T, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+export function badRequest(message = "Bad request") {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
+
+export function unauthorized(message = "Unauthorized") {
+  return NextResponse.json({ error: message }, { status: 401 });
+}
+
+export function notFound(message = "Not found") {
+  return NextResponse.json({ error: message }, { status: 404 });
 }
 
 export async function isAdmin(userId: string) {

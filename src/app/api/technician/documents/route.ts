@@ -29,7 +29,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { profile } = await requireTechnicianProfile();
+    const { profile, user } = await requireTechnicianProfile();
+    
+    if (!user.image) {
+      throw new HttpError(400, "Profile picture is required before uploading verification documents.");
+    }
     const body = await req.json();
     const parsed = schema.parse(body);
 

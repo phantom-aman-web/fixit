@@ -12,14 +12,17 @@ const WINDOW_MS = 60_000;
 
 // Limits per window (60s).
 export const GENERAL_RATE_LIMITS = {
-  login: 10,            // 10 login attempts per minute per IP
-  register: 5,          // 5 registrations per minute per IP
-  booking: 10,          // 10 bookings per minute per user
-  dispute: 5,           // 5 disputes per minute per user
-  disputeMessage: 20,   // 20 messages per minute per user
-  upload: 20,           // 20 uploads per minute per user
-  quote: 10,            // 10 quotes per minute per technician
-  payment: 10,          // 10 payment operations per minute per user
+  login: 10,              // 10 login attempts per minute per IP
+  register: 5,            // 5 registrations per minute per IP
+  booking: 10,            // 10 bookings per minute per user
+  payment_create: 10,     // 10 payment creations per minute per user
+  dispute: 5,             // 5 disputes per minute per user
+  disputeMessage: 20,     // 20 messages per minute per user
+  upload: 20,             // 20 uploads per minute per user
+  quote: 10,              // 10 quotes per minute per technician
+  payment: 10,            // 10 payment operations per minute per user
+  passwordReset: 3,       // 3 password reset requests per minute per IP
+  emailVerification: 5,   // 5 verification resends per minute per IP
 } as const;
 
 function check(bucketKey: string, limit: number): { allowed: boolean; retryAfterMs: number } {

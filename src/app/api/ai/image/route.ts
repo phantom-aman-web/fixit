@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const dataUrl = `data:${file.mimeType};base64,${file.buffer.toString("base64")}`;
 
     const result = await analyzeImage(
-      profile.userId,
+      profile.id,
       parsed.sessionId,
       dataUrl,
       parsed.equipmentContext ?? "",

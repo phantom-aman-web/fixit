@@ -29,6 +29,7 @@ function parseHash(): Route {
 
 interface RouterState {
   route: Route;
+  isReady: boolean;
   navigate: (path: string) => void;
   back: () => void;
   init: () => () => void;
@@ -36,6 +37,7 @@ interface RouterState {
 
 export const useRouter = create<RouterState>((set, get) => ({
   route: parseHash(),
+  isReady: false,
   navigate: (path) => {
     const clean = path.replace(/^#?\/?/, "");
     if (typeof window !== "undefined") {
@@ -53,7 +55,7 @@ export const useRouter = create<RouterState>((set, get) => ({
     if (!window.location.hash) {
       window.location.hash = "/home";
     }
-    set({ route: parseHash() });
+    set({ route: parseHash(), isReady: true });
     return () => window.removeEventListener("hashchange", onHash);
   },
 }));

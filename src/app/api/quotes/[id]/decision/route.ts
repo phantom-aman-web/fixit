@@ -33,6 +33,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         where: { id: rr.id },
         data: { status: "BOOKED" },
       });
+
+      // Update Booking to AWAITING_PAYMENT
+      const booking = await db.booking.findFirst({
+        where: { repairRequestId: rr.id, status: "QUOTE_SUBMITTED" },
+      });
+      if (booking) {
+        await db.booking.update({
+          where: { id: booking.id },
+          data: { status: "AWAITING_PAYMENT" },
+        });
+      }
     }
 
     await notifyQuoteDecision(id, parsed.decision === "APPROVED");

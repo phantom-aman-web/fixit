@@ -110,13 +110,17 @@ export function useUnreadNotifications() {
 export function useApi<T>(
   key: any[],
   path: string | null,
-  opts: { enabled?: boolean; refetchInterval?: number } = {}
+  opts: { enabled?: boolean; refetchInterval?: number | false; staleTime?: number; placeholderData?: any } = {}
 ) {
   return useQuery({
     queryKey: key,
     queryFn: () => apiFetch<T>(path!),
     enabled: !!path && (opts.enabled ?? true),
-    refetchInterval: opts.refetchInterval,
+    // Only override refetchInterval if the caller explicitly sets one;
+    // otherwise inherit the global 3s default from QueryClient.
+    ...(opts.refetchInterval !== undefined ? { refetchInterval: opts.refetchInterval } : {}),
+    ...(opts.staleTime !== undefined ? { staleTime: opts.staleTime } : {}),
+    ...(opts.placeholderData !== undefined ? { placeholderData: opts.placeholderData } : {}),
     retry: (failureCount, error) => {
       // Don't retry on auth/authz/validation errors — they won't succeed.
       if (error instanceof ApiError) {
@@ -128,7 +132,15 @@ export function useApi<T>(
   });
 }
 
-export function useApiMutation<T = any, V = any>(path: string, method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST") {
+export function useApiMutation<T = any, V = any>(
+  path: string, 
+  method: "POST" | "PATCH" | "PUT" | "DELETE" = "POST",
+  invalidateKeys?: any[][],
+  optimisticUpdate?: {
+    queryKey: any[];
+    updater: (oldData: any, newVariables: V) => any;
+  }
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: V) =>
@@ -136,8 +148,23 @@ export function useApiMutation<T = any, V = any>(path: string, method: "POST" | 
         method,
         body: body !== undefined ? JSON.stringify(body) : undefined,
       }),
+    onMutate: async (vars) => {
+      if (optimisticUpdate) {
+        await qc.cancelQueries({ queryKey: optimisticUpdate.queryKey });
+        const previous = qc.getQueryData(optimisticUpdate.queryKey);
+        qc.setQueryData(optimisticUpdate.queryKey, (old: any) => optimisticUpdate.updater(old, vars));
+        return { previous };
+      }
+    },
+    onError: (err, vars, context) => {
+      if (optimisticUpdate && context?.previous !== undefined) {
+        qc.setQueryData(optimisticUpdate.queryKey, context.previous);
+      }
+    },
     onSuccess: () => {
-      qc.invalidateQueries();
+      if (invalidateKeys !== undefined) {
+        invalidateKeys.forEach(k => qc.invalidateQueries({ queryKey: k }));
+      }
     },
     retry: (failureCount, error) => {
       // Don't retry mutations on auth/conflict/validation errors.

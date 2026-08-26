@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import { getEnvConfig } from "../src/lib/env";
 import { NextRequest } from "next/server";
 import { setMockUserForTests } from "../src/lib/api";
-import { GET as getUploadHandler } from "../src/app/api/uploads/[id]/route";
+import { GET as getUploadHandler } from "../src/app/api/uploads/[...id]/route";
 import { POST as aiImageHandler } from "../src/app/api/ai/image/route";
 import { storage } from "../src/lib/providers/storage";
 import { randomUUID } from "crypto";

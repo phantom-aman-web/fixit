@@ -3,18 +3,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Calendar,
   CheckCircle2,
+  ClipboardList,
   CreditCard,
   MapPin,
   MessageSquare,
+  Plus,
   Receipt,
   ShieldCheck,
   Timer,
+  Trash2,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -25,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TechnicianProfileDialog } from "@/features/marketplace/technician-profile-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -33,6 +38,8 @@ import {
   LoadingState,
   PageContainer,
   PageHeader,
+  FormSkeleton,
+  DetailSkeleton,
 } from "@/components/shared/states";
 import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi, useApiMutation, apiFetch } from "@/hooks/use-api";
@@ -109,6 +116,7 @@ type Booking = {
   createdAt: string;
   updatedAt: string;
   technician: Technician;
+  customer?: { id: string; phone?: string | null; user?: { name?: string | null; email?: string | null } | null } | null;
   repairRequest: RepairRequest;
   quote?: Quote | null;
   repairJob?: RepairJob | null;
@@ -116,7 +124,7 @@ type Booking = {
 };
 
 // Booking status lifecycle, in order.
-const BOOKING_STEPS = ["REQUESTED", "ACCEPTED", "SCHEDULED", "CONFIRMED", "COMPLETED"];
+const BOOKING_STEPS = ["REQUESTED", "ACCEPTED", "QUOTE_SUBMITTED", "AWAITING_PAYMENT", "CONFIRMED", "COMPLETED"];
 
 function stepIndex(status: string): number {
   const i = BOOKING_STEPS.indexOf(status);
@@ -273,7 +281,7 @@ function NewBookingForm({ requestId }: { requestId: string }) {
     }
   }, [request, scheduledAt]);
 
-  const createMutation = useApiMutation<{ booking: Booking }>("/api/bookings", "POST");
+  const createMutation = useApiMutation<{ booking: Booking }>("/api/bookings", "POST", [["bookings"], ["history"]]);
 
   const submit = async () => {
     if (!request) return;
@@ -299,7 +307,7 @@ function NewBookingForm({ requestId }: { requestId: string }) {
     }
   };
 
-  if (isLoading) return <LoadingState label="Loading your repair request…" />;
+  if (isLoading) return <FormSkeleton />;
   if (isError) {
     return <ErrorState title="Could not load repair request" detail={(error as Error)?.message} onRetry={() => refetch()} />;
   }
@@ -406,9 +414,22 @@ function NewBookingForm({ requestId }: { requestId: string }) {
                 <span className="font-medium">{formatCurrency(tech.baseCallOutFee)}</span>
               </div>
             )}
-            <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`technicians/${tech.id}`)}>
-              View profile
-            </Button>
+            <div className="flex gap-2">
+              <TechnicianProfileDialog technicianId={tech.id}>
+                <Button variant="outline" size="sm" className="flex-1">
+                  View profile
+                </Button>
+              </TechnicianProfileDialog>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="flex-1"
+                onClick={() => navigate(`messages/new?technicianId=${tech.id}`)}
+                title="Message technician"
+              >
+                <MessageSquare className="h-4 w-4 mr-2" /> Message
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -441,10 +462,19 @@ function NewBookingForm({ requestId }: { requestId: string }) {
 // ────────────────────────────────────────────────────────────────────────────────
 
 function ExistingBooking({ bookingId }: { bookingId: string }) {
+  const { data: session } = useSession();
+  const role = (session as any)?.user?.role;
+  const isTech = role === "TECHNICIAN" || role === "ADMIN";
+
+  const qc = useQueryClient();
+  const cached = qc.getQueryData<{ bookings: Booking[] }>(["bookings"]);
+  const cachedBooking = cached?.bookings.find((b) => b.id === bookingId);
+  const isActive = cachedBooking ? !["COMPLETED", "CANCELLED"].includes(cachedBooking.status) : true;
+
   const { refetch, ...rest } = useApi<{ bookings: Booking[] }>(
     ["bookings"],
     "/api/bookings",
-    { refetchInterval: 15_000 },
+    { refetchInterval: isActive ? 10_000 : false },
   );
   const data = rest.data;
   const booking = useMemo(() => data?.bookings.find((b) => b.id === bookingId), [data, bookingId]);
@@ -452,7 +482,73 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
   const quoteDecisionMutation = useApiMutation(
     booking?.quote ? `/api/quotes/${booking.quote.id}/decision` : "/api/quotes/_/decision",
     "POST",
+    [["bookings"], ["history"], ["technician-dashboard"]],
+    {
+      queryKey: ["bookings"],
+      updater: (oldData: any, newVars: any) => {
+        if (!oldData || !oldData.bookings) return oldData;
+        return {
+          ...oldData,
+          bookings: oldData.bookings.map((b: any) => {
+            if (b.id === bookingId && b.quote) {
+              return { 
+                ...b, 
+                quote: { ...b.quote, status: newVars.action === "approve" ? "ACCEPTED" : "REJECTED" },
+                status: newVars.action === "approve" ? "AWAITING_PAYMENT" : b.status 
+              };
+            }
+            return b;
+          })
+        };
+      }
+    }
   );
+  
+  const acceptBookingMutation = useApiMutation(
+    `/api/bookings/${bookingId}/transition`, 
+    "POST",
+    [["bookings"], ["history"], ["technician-dashboard"]],
+    {
+      queryKey: ["bookings"],
+      updater: (oldData: any, newVars: any) => {
+        if (!oldData || !oldData.bookings) return oldData;
+        return {
+          ...oldData,
+          bookings: oldData.bookings.map((b: any) => {
+            if (b.id === bookingId) {
+              return { ...b, status: newVars.status };
+            }
+            return b;
+          })
+        };
+      }
+    }
+  );
+  
+  const { route } = useRouter();
+
+  useEffect(() => {
+    const { payment_success, session_id } = route.query;
+    if (payment_success === "true" && session_id) {
+      // Clear the query from the URL so we don't trigger again
+      const cleanHash = window.location.hash.split("?")[0];
+      window.location.hash = cleanHash;
+
+      // Simulate webhook for mock provider
+      apiFetch("/api/webhooks/payment", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "checkout.session.completed",
+          data: { object: { id: session_id } }
+        })
+      }).then(() => {
+        toast.success("Mock payment confirmed!");
+        refetch();
+      }).catch(() => {
+        toast.error("Could not confirm mock payment");
+      });
+    }
+  }, [route.query, refetch]);
 
   const [paying, setPaying] = useState(false);
 
@@ -471,15 +567,18 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
     if (!booking?.quote) return;
     setPaying(true);
     try {
-      // 1. Create mock payment intent.
-      const intent = await apiFetch<{ payment: Payment }>(`/api/bookings/${booking.id}/payment`, {
+      const successUrl = `${window.location.origin}/#/booking/${booking.id}?payment_success=true`;
+      const cancelUrl = `${window.location.origin}/#/booking/${booking.id}?payment_cancel=true`;
+      
+      const res = await apiFetch<{ checkoutUrl: string }>(`/api/payments/create`, {
         method: "POST",
-        body: JSON.stringify({ amount: booking.quote.totalEstimate }),
+        body: JSON.stringify({ bookingId: booking.id, successUrl, cancelUrl }),
       });
-      // 2. Capture mock payment.
-      await apiFetch<{ payment: Payment }>(`/api/payments/${intent.payment.id}/capture`, { method: "POST" });
-      toast.success("Payment captured (mock). Your repair is now complete!");
-      await refetch();
+      
+      if (res.checkoutUrl) {
+        window.location.href = res.checkoutUrl;
+        return;
+      }
     } catch (e: any) {
       toast.error(e?.message ?? "Payment failed");
     } finally {
@@ -487,7 +586,17 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
     }
   };
 
-  if (rest.isLoading) return <LoadingState label="Loading booking…" />;
+  const onAcceptBooking = async () => {
+    try {
+      await acceptBookingMutation.mutateAsync({ status: "ACCEPTED" });
+      toast.success("Request accepted! You can now create a quote.");
+      await refetch();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not accept request");
+    }
+  };
+
+  if (rest.isLoading) return <DetailSkeleton />;
   if (rest.isError) {
     return (
       <ErrorState
@@ -509,12 +618,13 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
   }
 
   const tech = booking.technician;
+  const cust = booking.customer;
   const quote = booking.quote;
   const job = booking.repairJob;
   const payment = booking.payment;
-  const needsQuoteDecision = quote && quote.status === "SUBMITTED";
-  const canBook = quote && quote.status === "APPROVED" && booking.status === "REQUESTED";
-  const canPay = booking.status === "CONFIRMED" && !payment;
+  const needsQuoteDecision = !isTech && quote && quote.status === "SUBMITTED";
+  const canBook = !isTech && quote && quote.status === "APPROVED" && booking.status === "REQUESTED";
+  const canPay = !isTech && (booking.status === "AWAITING_PAYMENT" || booking.status === "CONFIRMED") && (!payment || payment.status === "PENDING" || payment.status === "FAILED");
   const showPayButton = canPay && quote;
 
   return (
@@ -562,6 +672,29 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
             )}
           </CardContent>
         </Card>
+
+        {isTech && booking.status === "REQUESTED" && (
+          <Card className="border-primary/40">
+            <CardHeader>
+              <CardTitle className="text-base">Accept booking request</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">Accept this request to create and send a quote.</p>
+              <Button onClick={onAcceptBooking} disabled={acceptBookingMutation.isPending} className="w-full">
+                {acceptBookingMutation.isPending ? "Accepting..." : "Accept request"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {isTech && booking.status === "ACCEPTED" && (
+          <QuoteForm
+            repairRequestId={booking.repairRequest.id}
+            existingQuote={quote}
+            enabled={true}
+            onSaved={() => refetch()}
+          />
+        )}
 
         {quote && <QuoteSummary quote={quote} />}
 
@@ -646,35 +779,88 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
 
       {/* Right column: technician + actions */}
       <div className="lg:col-span-1 space-y-5">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Technician</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-3">
-              <Avatar className="h-12 w-12 border">
-                {tech.avatarUrl ? <AvatarImage src={tech.avatarUrl} alt="" /> : null}
-                <AvatarFallback>{initials(tech.displayName)}</AvatarFallback>
-              </Avatar>
-              <div className="min-w-0">
-                <p className="flex items-center gap-1.5 font-medium">
-                  {tech.displayName}
-                  {tech.verified && <BadgeCheck className="h-4 w-4 text-emerald-600" />}
-                </p>
-                <p className="text-xs text-muted-foreground">★ {tech.rating.toFixed(1)} ({tech.ratingCount})</p>
+        {!isTech && tech && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Technician</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-12 w-12 border">
+                  {tech.avatarUrl ? <AvatarImage src={tech.avatarUrl} alt="" /> : null}
+                  <AvatarFallback>{initials(tech.displayName)}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    {tech.displayName}
+                    {tech.verified && <BadgeCheck className="h-4 w-4 text-emerald-600" />}
+                  </p>
+                  <p className="text-xs text-muted-foreground">★ {tech.rating.toFixed(1)} ({tech.ratingCount})</p>
+                </div>
               </div>
-            </div>
-            {tech.phone && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Phone</span>
-                <span className="font-medium">{tech.phone}</span>
+              {tech.phone && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Phone</span>
+                  <span className="font-medium">{tech.phone}</span>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <TechnicianProfileDialog technicianId={tech.id}>
+                  <Button variant="outline" size="sm" className="flex-1">
+                    View profile
+                  </Button>
+                </TechnicianProfileDialog>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={() => navigate(`messages/new?technicianId=${tech.id}`)}
+                  title="Message technician"
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" /> Message
+                </Button>
               </div>
-            )}
-            <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`technicians/${tech.id}`)}>
-              View profile
-            </Button>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
+
+        {isTech && cust && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Customer</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-12 w-12 border">
+                  <AvatarFallback>{initials(cust.user?.name || "Customer")}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 font-medium">
+                    {cust.user?.name || "Customer"}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">{cust.user?.email}</p>
+                </div>
+              </div>
+              {cust.phone && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Phone</span>
+                  <span className="font-medium">{cust.phone}</span>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex-1"
+                  onClick={() => navigate(`messages/new?customerId=${cust.id}`)}
+                  title="Message customer"
+                >
+                  <MessageSquare className="h-4 w-4 mr-2" /> Message
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {job && (
           <Card>
@@ -687,17 +873,206 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
                 <StatusBadge status={job.status} />
               </div>
               <Button onClick={() => navigate(`repair/${job.id}`)} className="w-full">
-                Track repair
+                {isTech ? "Begin now" : "Track repair"}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate("history")}>
-          <ArrowLeft className="h-4 w-4" /> Back to history
+        <Button variant="ghost" size="sm" className="w-full" onClick={() => navigate(isTech ? "technician/jobs" : "history")}>
+          <ArrowLeft className="h-4 w-4" /> {isTech ? "Back to jobs" : "Back to history"}
         </Button>
       </div>
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Quote Form (for Technicians)
+// ────────────────────────────────────────────────────────────────────────────────
+
+type ItemInput = { description: string; quantity: string; unitPrice: string };
+
+export function QuoteForm({
+  repairRequestId,
+  existingQuote,
+  onSaved,
+  enabled,
+}: {
+  repairRequestId: string;
+  existingQuote?: Quote | null;
+  onSaved: () => void;
+  enabled: boolean;
+}) {
+  const [items, setItems] = useState<ItemInput[]>(
+    existingQuote?.items.length
+      ? existingQuote.items.map((i) => ({
+          description: i.description,
+          quantity: String(i.quantity),
+          unitPrice: String(i.unitPrice / 100),
+        }))
+      : [{ description: "", quantity: "1", unitPrice: "" }],
+  );
+  const [inspectionFee, setInspectionFee] = useState(
+    existingQuote?.inspectionFee ? String(existingQuote.inspectionFee / 100) : "",
+  );
+  const [labor, setLabor] = useState(existingQuote?.labor ? String(existingQuote.labor / 100) : "");
+  const [taxesFees, setTaxesFees] = useState(
+    existingQuote?.taxesFees ? String(existingQuote.taxesFees / 100) : "",
+  );
+  const [warrantyMonths, setWarrantyMonths] = useState(
+    existingQuote?.warrantyMonths ? String(existingQuote.warrantyMonths) : "",
+  );
+  const [estimatedDurationHours, setEstimatedDurationHours] = useState(
+    existingQuote?.estimatedDurationHours ? String(existingQuote.estimatedDurationHours) : "",
+  );
+  const [notes, setNotes] = useState(existingQuote?.notes ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  const mutation = useApiMutation(`/api/quotes`, "POST", [["bookings"], ["history"], ["technician-dashboard"]]);
+
+  const addItem = () => setItems([...items, { description: "", quantity: "1", unitPrice: "" }]);
+  const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
+  const updateItem = (i: number, field: "description" | "quantity" | "unitPrice", value: string) =>
+    setItems(items.map((it, idx) => (idx === i ? { ...it, [field]: value } : it)));
+
+  const total = useMemo(() => {
+    const itemsTotal = items.reduce((s, it) => {
+      const qty = parseFloat(it.quantity || "0") || 0;
+      const price = Math.round((parseFloat(it.unitPrice || "0") || 0) * 100);
+      return s + qty * price;
+    }, 0);
+    const insp = Math.round((parseFloat(inspectionFee || "0") || 0) * 100);
+    const lab = Math.round((parseFloat(labor || "0") || 0) * 100);
+    const tax = Math.round((parseFloat(taxesFees || "0") || 0) * 100);
+    return itemsTotal + insp + lab + tax;
+  }, [items, inspectionFee, labor, taxesFees]);
+
+  const submit = async () => {
+    if (!repairRequestId) {
+      toast.error("Missing repair request context.");
+      return;
+    }
+    const cleanItems = items
+      .filter((it) => it.description.trim() && parseFloat(it.unitPrice || "0") > 0)
+      .map((it) => ({
+        description: it.description.trim(),
+        quantity: parseInt(it.quantity || "1", 10) || 1,
+        unitPrice: Math.round((parseFloat(it.unitPrice || "0") || 0) * 100),
+      }));
+    setSubmitting(true);
+    try {
+      await mutation.mutateAsync({
+        repairRequestId,
+        inspectionFee: Math.round((parseFloat(inspectionFee || "0") || 0) * 100),
+        labor: Math.round((parseFloat(labor || "0") || 0) * 100),
+        taxesFees: Math.round((parseFloat(taxesFees || "0") || 0) * 100),
+        warrantyMonths: warrantyMonths ? parseInt(warrantyMonths, 10) : undefined,
+        estimatedDurationHours: estimatedDurationHours ? parseFloat(estimatedDurationHours) : undefined,
+        notes: notes.trim() || undefined,
+        items: cleanItems,
+      });
+      toast.success("Quote submitted.");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not submit quote");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!enabled) return null;
+
+  return (
+    <Card className="mt-5 border-primary/30">
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2"><ClipboardList className="h-4 w-4 text-primary" /> Create Quote</span>
+          {existingQuote && <StatusBadge status={existingQuote.status} />}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-3">
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Items / parts</Label>
+          {items.map((it, i) => (
+            <div key={i} className="grid grid-cols-12 gap-2">
+              <Input
+                className="col-span-12 sm:col-span-6"
+                placeholder="Description (e.g. Drive belt)"
+                value={it.description}
+                onChange={(e) => updateItem(i, "description", e.target.value)}
+              />
+              <Input
+                className="col-span-3 sm:col-span-2"
+                type="text"
+                inputMode="numeric"
+                placeholder="Qty"
+                value={it.quantity}
+                onChange={(e) => updateItem(i, "quantity", e.target.value.replace(/[^0-9]/g, ""))}
+              />
+              <Input
+                className="col-span-7 sm:col-span-3"
+                type="text"
+                inputMode="decimal"
+                placeholder="Unit price (ETB)"
+                value={it.unitPrice}
+                onChange={(e) => updateItem(i, "unitPrice", e.target.value.replace(/[^0-9.]/g, ""))}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="col-span-2 sm:col-span-1"
+                onClick={() => removeItem(i)}
+                disabled={items.length === 1}
+                aria-label="Remove item"
+              >
+                <Trash2 className="h-4 w-4 text-muted-foreground" />
+              </Button>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" onClick={addItem}>
+            <Plus className="h-4 w-4" /> Add item
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="q-insp">Inspection fee (ETB)</Label>
+            <Input id="q-insp" type="text" inputMode="decimal" value={inspectionFee} onChange={(e) => setInspectionFee(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="q-labor">Labor (ETB)</Label>
+            <Input id="q-labor" type="text" inputMode="decimal" value={labor} onChange={(e) => setLabor(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="q-tax">Taxes &amp; fees (ETB)</Label>
+            <Input id="q-tax" type="text" inputMode="decimal" value={taxesFees} onChange={(e) => setTaxesFees(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="q-warranty">Warranty months (optional)</Label>
+            <Input id="q-warranty" type="text" inputMode="numeric" value={warrantyMonths} onChange={(e) => setWarrantyMonths(e.target.value.replace(/[^0-9]/g, ""))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="q-duration">Est. duration hours (optional)</Label>
+            <Input id="q-duration" type="text" inputMode="decimal" value={estimatedDurationHours} onChange={(e) => setEstimatedDurationHours(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="q-notes">Notes for customer (optional)</Label>
+          <Textarea id="q-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Explain what's included, assumptions, etc." />
+        </div>
+
+        <div className="flex items-center justify-between rounded-md bg-muted/40 p-3">
+          <span className="text-sm text-muted-foreground">Total estimate</span>
+          <span className="text-lg font-bold text-primary">{formatCurrency(total)}</span>
+        </div>
+
+        <Button onClick={submit} disabled={submitting} className="w-full">
+          {submitting ? "Submitting…" : existingQuote ? "Update quote" : "Submit quote"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -706,14 +1081,17 @@ function ExistingBooking({ bookingId }: { bookingId: string }) {
 // ────────────────────────────────────────────────────────────────────────────────
 
 export function BookingScreen({ bookingId }: { bookingId: string }) {
-  const { status } = useSession();
+  const { status, data: sessionData } = useSession();
   const router = useRouter();
   const requestId = (router.route.query.requestId as string) || undefined;
+
+  const role = (sessionData as any)?.user?.role;
+  const isTech = role === "TECHNICIAN" || role === "ADMIN";
 
   if (status === "loading") {
     return (
       <PageContainer>
-        <LoadingState label="Loading…" />
+        <FormSkeleton />
       </PageContainer>
     );
   }
@@ -746,10 +1124,13 @@ export function BookingScreen({ bookingId }: { bookingId: string }) {
 
   return (
     <PageContainer>
-      <Button variant="ghost" size="sm" className="mb-3 -ml-2" onClick={() => navigate("history")}>
-        <ArrowLeft className="h-4 w-4" /> Back to history
+      <Button variant="ghost" size="sm" className="mb-3 -ml-2" onClick={() => navigate(isTech ? "technician/jobs" : "history")}>
+        <ArrowLeft className="h-4 w-4" /> {isTech ? "Back to jobs" : "Back to history"}
       </Button>
-      <PageHeader title="Booking" description="Review your quote, confirm, and pay." />
+      <PageHeader 
+        title="Booking" 
+        description={isTech ? "Manage this booking request and quote." : "Review your quote, confirm, and pay."} 
+      />
       <ExistingBooking bookingId={bookingId} />
     </PageContainer>
   );

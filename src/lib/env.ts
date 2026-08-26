@@ -40,12 +40,15 @@ export interface EnvConfig {
   supabaseStorageBucket?: string;
 
   // Email
-  emailProvider: string; // "console" | "smtp" | "ses"
+  emailProvider: string; // "console" | "resend" | "smtp"
+  resendApiKey?: string;
   smtpHost?: string;
   smtpPort?: number;
   smtpUser?: string;
   smtpPassword?: string;
   emailFrom: string;
+  emailReplyTo?: string;
+  appUrl: string; // validated base URL — used for email links ONLY
 
   // Realtime
   realtimePort: number;
@@ -130,11 +133,14 @@ export function getEnvConfig(): EnvConfig {
     supabaseStorageBucket: process.env.SUPABASE_STORAGE_BUCKET,
 
     emailProvider,
+    resendApiKey: process.env.RESEND_API_KEY,
     smtpHost: process.env.SMTP_HOST,
     smtpPort: Number(process.env.SMTP_PORT) || 587,
     smtpUser: process.env.SMTP_USER,
     smtpPassword: process.env.SMTP_PASSWORD,
     emailFrom: getEnv("EMAIL_FROM", "noreply@fixit.app"),
+    emailReplyTo: process.env.EMAIL_REPLY_TO,
+    appUrl: getEnv("APP_URL", "http://localhost:3000"),
 
     realtimePort: Number(process.env.REALTIME_PORT) || 3003,
 

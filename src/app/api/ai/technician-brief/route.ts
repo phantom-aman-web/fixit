@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
       include: {
         problem: { include: { category: true, equipment: true, media: true } },
         session: { include: { diagnoses: { include: { cause: true } }, stepResults: { include: { step: true } }, answers: true } },
-        customer: { include: { user: true } },
-        technician: { include: { user: true } },
+        customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } },
+        technician: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } },
         quote: true,
       },
     });
@@ -60,3 +60,4 @@ export async function POST(req: NextRequest) {
     return apiError(e);
   }
 }
+

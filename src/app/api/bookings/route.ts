@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { ok, apiError, requireCustomerProfile, HttpError } from "@/lib/api";
+import { ok, apiError, requireCustomerProfile, requireAuth, HttpError } from "@/lib/api";
 import { checkAvailability } from "@/services/scheduling-service";
 import { checkGeneralRateLimit } from "@/lib/rate-limit";
 import { auditLog } from "@/services/audit-service";
+import { notify } from "@/services/notifications";
 
 const schema = z.object({
   repairRequestId: z.string(),
@@ -16,14 +17,26 @@ const schema = z.object({
 
 export async function GET() {
   try {
-    const { profile } = await requireCustomerProfile();
+    const user = await requireAuth();
+    let whereClause = {};
+
+    if (user.role === "TECHNICIAN") {
+      const tech = await db.technicianProfile.findUnique({ where: { userId: user.id } });
+      if (!tech) throw new HttpError(403, "Technician not found");
+      whereClause = { technicianId: tech.id };
+    } else {
+      const { profile } = await requireCustomerProfile();
+      whereClause = { customerId: profile.id };
+    }
+
     const items = await db.booking.findMany({
-      where: { customerId: profile.id },
+      where: whereClause,
       include: {
         technician: true,
+        customer: { include: { user: true } },
         repairRequest: { include: { problem: { include: { category: true } } } },
         quote: { include: { items: true } },
-        repairJob: true,
+        repairJob: { include: { warranty: true, review: true, customerReview: true, parts: true, statusHistory: true } },
         payment: true,
         appointment: true,
       },
@@ -87,11 +100,6 @@ export async function POST(req: NextRequest) {
         include: { technician: true, repairRequest: { include: { problem: { include: { category: true } } } } },
       });
 
-      // Create the repair job immediately (SCHEDULED).
-      await tx.repairJob.create({
-        data: { bookingId: b.id, status: "SCHEDULED" },
-      });
-
       // Create the appointment record (Phase 3).
       await tx.appointment.create({
         data: {
@@ -114,20 +122,16 @@ export async function POST(req: NextRequest) {
       metadata: { technicianId: rr.technicianId, scheduledAt: scheduledAt.toISOString() },
     });
 
-    // Notify technician.
-    const tech = await db.technicianProfile.findUnique({
-      where: { id: rr.technicianId },
-      include: { user: true },
-    });
+    // Notify technician via the central notification service.
+    // booking.technician was included in the transaction query above.
+    const tech = booking.technician;
     if (tech) {
-      await db.notification.create({
-        data: {
-          userId: tech.userId,
-          type: "booking_requested",
-          title: "New booking request",
-          body: `A customer requested a booking for ${scheduledAt.toLocaleString()}.`,
-          dataJson: JSON.stringify({ bookingId: booking.id }),
-        },
+      void notify({
+        userId: tech.userId,
+        type: "booking_requested",
+        title: "New booking request",
+        body: `A customer requested a booking for ${scheduledAt.toLocaleString()}.`,
+        data: { bookingId: booking.id },
       });
     }
 

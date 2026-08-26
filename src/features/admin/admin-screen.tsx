@@ -69,6 +69,9 @@ import {
   LoadingState,
   PageContainer,
   PageHeader,
+  DashboardSkeleton,
+  ListSkeleton,
+  DetailSkeleton,
 } from "@/components/shared/states";
 import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi, useApiMutation, apiFetch } from "@/hooks/use-api";
@@ -206,7 +209,7 @@ function RecentJobsTable({ jobs }: { jobs: RecentJob[] }) {
 // ────────────────────────────────────────────────────────────────────────────────
 
 function TechnicianAdminRow({ tech, onAction }: { tech: TechnicianRow; onAction: () => void }) {
-  const patch = useApiMutation(`/api/admin/technicians/${tech.id}`, "PATCH");
+  const patch = useApiMutation(`/api/admin/technicians/${tech.id}`, "PATCH", [["admin", "technicians"]]);
 
   const setStatus = async (status: "ACTIVE" | "SUSPENDED") => {
     try {
@@ -272,7 +275,7 @@ function AdminTechniciansTab() {
     "/api/admin/technicians",
   );
 
-  if (isLoading) return <LoadingState label="Loading technicians…" />;
+  if (isLoading) return <ListSkeleton />;
   if (isError) {
     return (
       <ErrorState
@@ -426,7 +429,7 @@ function AdminDiagnosticsTab() {
     "/api/admin/diagnostics",
   );
 
-  if (isLoading) return <LoadingState label="Loading diagnostic content…" />;
+  if (isLoading) return <ListSkeleton />;
   if (isError) {
     return (
       <ErrorState
@@ -501,7 +504,7 @@ export function AdminScreen() {
   if (status === "loading") {
     return (
       <PageContainer>
-        <LoadingState label="Loading admin…" />
+        <DashboardSkeleton />
       </PageContainer>
     );
   }
@@ -523,7 +526,7 @@ export function AdminScreen() {
     return (
       <PageContainer>
         <PageHeader title="Admin" description="Manage technicians, jobs, and diagnostic content." />
-        <LoadingState label="Loading admin stats…" />
+        <DashboardSkeleton />
       </PageContainer>
     );
   }
@@ -673,7 +676,7 @@ export function AdminScreen() {
 function AdminAITab() {
   const { data, isLoading, isError, refetch } = useApi<{ stats: any }>(["ai-stats"], "/api/ai/admin/stats");
 
-  if (isLoading) return <LoadingState label="Loading AI analytics…" />;
+  if (isLoading) return <DashboardSkeleton />;
   if (isError) return <ErrorState onRetry={refetch} />;
 
   const s = data?.stats;
@@ -843,10 +846,10 @@ function DocumentRow({ doc, onAction }: { doc: VerificationDocument; onAction: (
           <p className="text-sm font-medium">{tech.displayName}</p>
           <p className="text-xs text-muted-foreground">{tech.user.email}</p>
         </div>
-        <div className="rounded-md bg-muted/30 p-2 text-xs">
-          <p className="font-mono">{doc.fileName}</p>
+        <a href={`/api/uploads/${doc.storageKey}`} target="_blank" rel="noopener noreferrer" className="block rounded-md bg-muted/30 p-2 text-xs hover:bg-muted/50 transition-colors">
+          <p className="font-mono text-blue-600 dark:text-blue-400 hover:underline">{doc.fileName}</p>
           <p className="mt-0.5 text-muted-foreground">storage: {doc.storageKey.slice(0, 24)}…</p>
-        </div>
+        </a>
         <div className="space-y-1.5">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Skills</p>
           <SkillBadges skills={tech.skills} />
@@ -938,7 +941,9 @@ function PendingTechRow({ tech, onAction }: { tech: PendingTech; onAction: () =>
             <ul className="space-y-1">
               {tech.documents.map((d) => (
                 <li key={d.id} className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1 text-xs">
-                  <span className="truncate font-mono">{d.fileName}</span>
+                  <a href={`/api/uploads/${d.storageKey}`} target="_blank" rel="noopener noreferrer" className="truncate font-mono text-blue-600 dark:text-blue-400 hover:underline">
+                    {d.fileName}
+                  </a>
                   <StatusBadge status={d.status} />
                 </li>
               ))}
@@ -977,7 +982,7 @@ function AdminVerificationTab() {
     "/api/admin/verification",
   );
 
-  if (isLoading) return <LoadingState label="Loading verification queue…" />;
+  if (isLoading) return <ListSkeleton />;
   if (isError) {
     return (
       <ErrorState
@@ -1231,10 +1236,9 @@ function AdminDisputesTab() {
   const { data, isLoading, isError, error, refetch } = useApi<{ disputes: Dispute[] }>(
     ["admin-disputes"],
     "/api/disputes",
-    { refetchInterval: 30_000 },
   );
 
-  if (isLoading) return <LoadingState label="Loading disputes…" />;
+  if (isLoading) return <ListSkeleton />;
   if (isError) {
     return (
       <ErrorState
@@ -1368,7 +1372,7 @@ function AdminAnalyticsTab() {
     "/api/admin/analytics",
   );
 
-  if (isLoading) return <LoadingState label="Loading analytics…" />;
+  if (isLoading) return <DashboardSkeleton />;
   if (isError) {
     return (
       <ErrorState
@@ -1608,7 +1612,7 @@ function AdminAuditLogTab() {
       </Card>
 
       {isLoading ? (
-        <LoadingState label="Loading audit log…" />
+        <ListSkeleton />
       ) : isError ? (
         <ErrorState
           title="Could not load audit log"

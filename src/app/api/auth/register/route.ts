@@ -6,6 +6,7 @@ import { ok, apiError, HttpError } from "@/lib/api";
 import { ADDIS_ABABA_AREAS } from "@/lib/geo";
 import { checkGeneralRateLimit } from "@/lib/rate-limit";
 import { auditLog } from "@/services/audit-service";
+import { notifyWelcome } from "@/services/notifications";
 
 const schema = z.object({
   name: z.string().min(2).max(80),
@@ -71,6 +72,9 @@ export async function POST(req: NextRequest) {
       entityId: user.id,
       metadata: { role: parsed.role },
     });
+
+    // Welcome email — fire and forget after successful registration.
+    void notifyWelcome({ userId: user.id, name: user.name ?? user.email, email: user.email });
 
     return ok({ ok: true, userId: user.id, role: parsed.role });
   } catch (e) {

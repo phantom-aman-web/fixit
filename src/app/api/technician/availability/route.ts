@@ -14,7 +14,7 @@ const schema = z.object({
 
 export async function GET() {
   try {
-    const { profile } = await requireTechnicianProfile();
+    const { profile } = await requireTechnicianProfile({ allowPending: true });
     const slots = await db.availabilitySlot.findMany({
       where: { technicianId: profile.id },
       orderBy: { dayOfWeek: "asc" },

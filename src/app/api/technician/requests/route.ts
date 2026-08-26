@@ -18,9 +18,9 @@ export async function GET(req: NextRequest) {
         ...(status ? { status } : {}),
       },
       include: {
-        problem: { include: { category: true, equipment: true, media: true, customer: { include: { user: true } } } },
+        problem: { include: { category: true, equipment: true, media: true, customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } } } },
         session: true,
-        customer: { include: { user: true } },
+        customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } },
         matches: { where: { technicianId: profile.id } },
         quote: { include: { items: true } },
         booking: { include: { repairJob: true } },
@@ -32,3 +32,4 @@ export async function GET(req: NextRequest) {
     return apiError(e);
   }
 }
+

@@ -24,7 +24,7 @@ import {
 import {
   EmptyState,
   ErrorState,
-  LoadingState,
+  ListSkeleton,
   PageContainer,
   PageHeader,
 } from "@/components/shared/states";
@@ -32,6 +32,8 @@ import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi } from "@/hooks/use-api";
 import { navigate } from "@/store/router";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { ContextualSearch, type SearchResultItem } from "@/components/search/contextual-search";
+import { scoreItem } from "@/lib/search/ranking";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -145,6 +147,7 @@ function HistoryRow({ req }: { req: RepairRequest }) {
 export function HistoryScreen() {
   const { status } = useSession();
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
 
   const { data, isLoading, isError, error, refetch } = useApi<{ requests: RepairRequest[] }>(
     ["repair-requests", "history"],
@@ -152,16 +155,21 @@ export function HistoryScreen() {
   );
 
   const requests = useMemo(() => {
-    const list = data?.requests ?? [];
-    if (statusFilter === "all") return list;
-    return list.filter((r) => r.status === statusFilter);
-  }, [data, statusFilter]);
+    let list = data?.requests ?? [];
+    if (statusFilter !== "all") {
+      list = list.filter((r) => r.status === statusFilter);
+    }
+    
+    // Filtering logic was moved to ContextualSearch's onSearch
+    
+    return list;
+  }, [data, statusFilter, search]);
 
   if (status === "loading" || isLoading) {
     return (
       <PageContainer>
         <PageHeader title="History" />
-        <LoadingState label="Loading your repairs…" />
+        <ListSkeleton />
       </PageContainer>
     );
   }
@@ -188,7 +196,43 @@ export function HistoryScreen() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Filter</span>
+        <ContextualSearch
+          queryKey="history-search"
+          placeholder="Search history..."
+          className="w-full sm:w-64"
+          onSearch={async (q) => {
+            const qLower = q.trim();
+            if (!qLower) return [];
+            
+            const list = data?.requests ?? [];
+            return list.map(req => {
+              const score = scoreItem(qLower, [
+                { name: "technician", value: req.technician?.displayName, weight: 10.0 },
+                { name: "equipment", value: req.problem?.category?.name, weight: 5.0 },
+                { name: "bookingRef", value: req.booking?.id?.substring(0, 8), weight: 3.0 },
+                { name: "status", value: req.status, weight: 1.0 },
+                { name: "date", value: req.createdAt, weight: 0.5 },
+              ]);
+              return {
+                id: req.id,
+                title: req.technician?.displayName || "Request",
+                subtitle: req.problem?.category?.name || "Equipment",
+                score: score.score,
+                req
+              };
+            }).filter(x => x.score > 0)
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5);
+          }}
+          onSelect={(item) => {
+            // @ts-ignore
+            const req = item.req;
+            if (req.booking?.repairJob) navigate(`repair/${req.booking.repairJob.id}`);
+            else if (req.booking) navigate(`booking/${req.booking.id}`);
+            else navigate(`technicians?requestId=${req.id}`);
+          }}
+        />
+        <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">Filter</span>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="h-8 w-[180px]"><SelectValue /></SelectTrigger>
           <SelectContent>

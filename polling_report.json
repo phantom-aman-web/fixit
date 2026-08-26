@@ -1,0 +1,29 @@
+{
+  "": [
+    "/api/auth/providers",
+    "/api/auth/csrf",
+    "/api/auth/callback/credentials"
+  ],
+  "Dashboard": [
+    "/api/presence",
+    "/api/notifications/unread-count",
+    "/api/customer/dashboard",
+    "/api/customer/equipment"
+  ],
+  "Equipment": [
+    "/api/notifications/unread-count",
+    "/api/conversations"
+  ],
+  "Messages (List)": [
+    "/api/notifications/unread-count",
+    "/api/uploads/files/b3cf913c-5b48-4d0e-b33e-afd201d2afd1",
+    "/api/conversations",
+    "/api/conversations"
+  ],
+  "Hidden Tab": [
+    "/api/notifications/unread-count",
+    "/api/conversations",
+    "/api/conversations",
+    "/api/notifications/unread-count"
+  ]
+}

@@ -61,7 +61,7 @@ ${history}`;
     const knowledge = await retrieveKnowledge(parsed.message);
     const knowledgeStr = formatKnowledgeForPrompt(knowledge);
 
-    const result = await converse(profile.userId, parsed.sessionId, context, knowledgeStr);
+    const result = await converse(profile.id, parsed.sessionId, context, knowledgeStr);
 
     // Persist the assistant response.
     if (result.response) {

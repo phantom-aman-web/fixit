@@ -11,6 +11,8 @@ const createSchema = z.object({
   nickname: z.string().optional(),
   notes: z.string().optional(),
   purchaseDate: z.string().optional(),
+  imageUrls: z.array(z.string()).default([]),
+  customCategoryName: z.string().optional(),
 });
 
 export async function GET() {
@@ -18,7 +20,7 @@ export async function GET() {
     const { profile } = await requireCustomerProfile();
     const items = await db.customerEquipment.findMany({
       where: { customerId: profile.id },
-      include: { category: true, maintenanceRecords: { orderBy: { date: "desc" } } },
+      include: { category: true },
       orderBy: { createdAt: "desc" },
     });
     return ok({ equipment: items });
@@ -45,6 +47,8 @@ export async function POST(req: NextRequest) {
         nickname: parsed.nickname,
         notes: parsed.notes,
         purchaseDate: parsed.purchaseDate ? new Date(parsed.purchaseDate) : undefined,
+        imageUrls: parsed.imageUrls,
+        customCategoryName: parsed.customCategoryName,
       },
       include: { category: true },
     });

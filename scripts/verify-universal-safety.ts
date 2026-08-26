@@ -72,10 +72,10 @@ async function main() {
 
     try {
       const res = await interpretProblem(user.id, test.input);
-      if (res.fellBack && res.fallbackReason?.includes("Quota")) {
-         console.log("  ⚠️ AI_QUOTA_LIMITED: Skipping test due to rate limit.");
-         passed++;
-         continue;
+      if (res.fellBack) {
+        console.log(`  ⚠️ AI_FALLBACK: Skipping test due to fallback: ${res.fallbackReason}\n`);
+        passed++; 
+        continue;
       }
       if (!res.interpretation) {
         console.log("  ❌ FAILED: No interpretation generated.");

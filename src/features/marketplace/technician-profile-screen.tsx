@@ -23,10 +23,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  PageContainer,
   EmptyState,
   ErrorState,
-  LoadingState,
-  PageContainer,
+  DetailSkeleton,
 } from "@/components/shared/states";
 import { StatusBadge } from "@/components/shared/status-badges";
 import { useApi, useApiMutation } from "@/hooks/use-api";
@@ -60,6 +60,7 @@ type Technician = {
   displayName: string;
   bio?: string | null;
   avatarUrl?: string | null;
+  user?: { lastSeenAt?: string | null } | null;
   phone?: string | null;
   yearsExperience: number;
   completedJobs: number;
@@ -74,6 +75,7 @@ type Technician = {
   skills: Skill[];
   serviceAreas: { id: string; serviceArea: ServiceArea }[];
   reviews: Review[];
+  canMessage?: boolean;
 };
 
 type RepairRequest = {
@@ -123,6 +125,7 @@ export function TechnicianProfileScreen({ technicianId }: { technicianId: string
   const selectMutation = useApiMutation(
     requestId ? `/api/repair-requests/${requestId}/select` : "/api/repair-requests/_/select",
     "POST",
+    [["history"]]
   );
 
   const tech = data?.technician;
@@ -141,7 +144,7 @@ export function TechnicianProfileScreen({ technicianId }: { technicianId: string
   if (status === "loading" || isLoading) {
     return (
       <PageContainer>
-        <LoadingState label="Loading technician profile…" />
+        <DetailSkeleton />
       </PageContainer>
     );
   }
@@ -184,6 +187,26 @@ export function TechnicianProfileScreen({ technicianId }: { technicianId: string
                   <BadgeCheck className="h-3.5 w-3.5" /> Verified
                 </Badge>
               )}
+              {(() => {
+                let state = "Offline";
+                let colorClass = "bg-muted text-muted-foreground";
+                if (tech.user?.lastSeenAt) {
+                  const diff = Date.now() - new Date(tech.user.lastSeenAt).getTime();
+                  if (diff < 5 * 60 * 1000) {
+                    state = "Online";
+                    colorClass = "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400";
+                  } else if (diff < 30 * 60 * 1000) {
+                    state = "Away";
+                    colorClass = "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
+                  }
+                }
+                return (
+                  <Badge variant="secondary" className={`gap-1 font-medium ${colorClass}`}>
+                    <div className={`h-2 w-2 rounded-full ${state === 'Online' ? 'bg-emerald-500' : state === 'Away' ? 'bg-amber-500' : 'bg-muted-foreground'}`} />
+                    {state}
+                  </Badge>
+                );
+              })()}
               <StatusBadge status={tech.availability} />
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -221,19 +244,17 @@ export function TechnicianProfileScreen({ technicianId }: { technicianId: string
           </div>
 
           <div className="flex w-full shrink-0 flex-col gap-2 md:w-56">
-            {requestId ? (
-              <Button onClick={onSelect} disabled={selectMutation.isPending}>
-                {selectMutation.isPending ? "Selecting…" : "Request this technician"}
-              </Button>
-            ) : (
-              <Button onClick={() => navigate("diagnose?hint=technician")}>
-                <Wrench className="h-4 w-4" /> Start a diagnosis
-              </Button>
-            )}
+            <Button 
+              onClick={requestId ? onSelect : () => navigate(`diagnose?technicianId=${tech.id}`)} 
+              disabled={selectMutation.isPending} 
+              className="w-full"
+            >
+              {selectMutation.isPending ? "Selecting…" : "Request this technician"}
+            </Button>
             <p className="text-center text-xs text-muted-foreground">
               {requestId
                 ? "Selects this technician for your active repair request."
-                : "Run a diagnostic first, then we'll match you with the right technician."}
+                : "Run a diagnostic first, then we'll schedule this technician."}
             </p>
           </div>
         </CardContent>

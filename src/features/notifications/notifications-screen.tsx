@@ -46,6 +46,7 @@ type NotificationData = {
   bookingId?: string;
   jobId?: string;
   repairRequestId?: string;
+  requestId?: string;
   quoteId?: string;
   sessionId?: string;
   warrantyId?: string;
@@ -69,7 +70,7 @@ const TYPE_ICON: Record<string, typeof Bell> = {
 };
 
 export function NotificationsScreen() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const qc = useQueryClient();
 
   const query = useApi<{ notifications: Notification[] }>(
@@ -92,10 +93,13 @@ export function NotificationsScreen() {
 
   function targetPath(n: Notification): string | null {
     const d = parseData(n);
+    const isTech = session?.user?.role === "TECHNICIAN";
+    
     if (d.path) return d.path;
-    if (d.bookingId) return `booking/${d.bookingId}`;
+    if (d.bookingId) return isTech ? "technician" : `booking/${d.bookingId}`;
     if (d.jobId) return `repair/${d.jobId}`;
-    if (d.repairRequestId) return `repair/${d.repairRequestId}`;
+    if (d.repairRequestId || d.requestId) return isTech ? "technician" : `repair/${d.repairRequestId || d.requestId}`;
+    if (d.quoteId) return `history`;
     if (d.sessionId) return `diagnose/session/${d.sessionId}`;
     return null;
   }

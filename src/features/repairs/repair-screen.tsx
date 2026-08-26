@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { io, type Socket } from "socket.io-client";
 import {
   AlertTriangle,
@@ -28,7 +29,8 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { TechnicianProfileDialog } from "@/features/marketplace/technician-profile-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -44,6 +46,8 @@ import { RepairTimeline, buildTimelineFromJob } from "@/components/shared/repair
 import { useApi, useApiMutation, apiFetch } from "@/hooks/use-api";
 import { navigate } from "@/store/router";
 import { formatCurrency, formatDateTime, timeAgo } from "@/lib/format";
+import { MediaUploader } from "@/components/shared/media-uploader";
+import { QuoteForm } from "@/features/bookings/booking-screen";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -72,6 +76,7 @@ type Quote = {
   partsTotal: number;
   taxesFees: number;
   totalEstimate: number;
+  currency: string;
   notes?: string | null;
   warrantyMonths?: number | null;
   estimatedDurationHours?: number | null;
@@ -100,6 +105,7 @@ type Warranty = {
   durationMonths: number;
   coveredWork: string;
   status: string;
+  documentUrl?: string | null;
 };
 
 type Customer = { id: string; user?: { id: string; name?: string | null; email?: string | null } | null; phone?: string | null; subCity?: string | null };
@@ -128,6 +134,7 @@ type RepairJob = {
   statusHistory: StatusHistory[];
   parts: RepairPart[];
   review?: Review | null;
+  customerReview?: Review | null;
   warranty?: Warranty | null;
 };
 
@@ -138,8 +145,6 @@ const JOB_STEPS = [
   "ARRIVED",
   "INSPECTING",
   "DIAGNOSING",
-  "QUOTE_SUBMITTED",
-  "AWAITING_APPROVAL",
   "REPAIRING",
   "COMPLETED",
 ];
@@ -149,9 +154,7 @@ const NEXT_STATUS: Record<string, string | null> = {
   EN_ROUTE: "ARRIVED",
   ARRIVED: "INSPECTING",
   INSPECTING: "DIAGNOSING",
-  DIAGNOSING: "QUOTE_SUBMITTED",
-  QUOTE_SUBMITTED: "AWAITING_APPROVAL",
-  AWAITING_APPROVAL: "REPAIRING",
+  DIAGNOSING: "REPAIRING",
   REPAIRING: "COMPLETED",
   COMPLETED: null,
 };
@@ -161,8 +164,6 @@ const NEXT_STATUS_LABEL: Record<string, string> = {
   ARRIVED: "Mark arrived",
   INSPECTING: "Begin inspection",
   DIAGNOSING: "Begin diagnosing",
-  QUOTE_SUBMITTED: "Mark quote submitted",
-  AWAITING_APPROVAL: "Move to awaiting approval",
   REPAIRING: "Begin repair",
   COMPLETED: "Mark complete",
 };
@@ -254,30 +255,62 @@ function ReviewForm({ jobId }: { jobId: string }) {
   const [valueRating, setValueRating] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
-  const mutation = useApiMutation(`/api/reviews/${jobId}`, "POST");
+  const mutation = useApiMutation(`/api/reviews/${jobId}`, "POST", [["repair-job", jobId]]);
 
-  const submit = async () => {
+  const submit = () => {
     if (rating < 1) {
       toast.error("Please select a star rating.");
       return;
     }
-    setSubmitting(true);
-    try {
-      await mutation.mutateAsync({
-        rating,
-        title: title.trim() || undefined,
-        body: body.trim() || undefined,
-        qualityRating: qualityRating || undefined,
-        professionalismRating: professionalismRating || undefined,
-        communicationRating: communicationRating || undefined,
-        valueRating: valueRating || undefined,
-      });
-      toast.success("Review submitted. Thank you!");
-    } catch (e: any) {
-      toast.error(e?.message ?? "Could not submit review");
-    } finally {
-      setSubmitting(false);
-    }
+    
+    // Optimistic UI update
+    const qc = useQueryClient();
+    const tempReview = {
+      id: `temp-${Date.now()}`,
+      rating,
+      title: title.trim() || null,
+      body: body.trim() || null,
+      qualityRating: qualityRating || null,
+      professionalismRating: professionalismRating || null,
+      communicationRating: communicationRating || null,
+      valueRating: valueRating || null,
+      createdAt: new Date().toISOString()
+    };
+    
+    qc.setQueryData(["bookings-for-repair", jobId], (oldData: any) => {
+      if (!oldData || !oldData.bookings) return oldData;
+      return {
+        ...oldData,
+        bookings: oldData.bookings.map((b: any) => {
+          if (b.repairJob?.id === jobId) {
+            return {
+              ...b,
+              repairJob: { ...b.repairJob, review: tempReview }
+            };
+          }
+          return b;
+        })
+      };
+    });
+
+    mutation.mutate({
+      rating,
+      title: title.trim() || undefined,
+      body: body.trim() || undefined,
+      qualityRating: qualityRating || undefined,
+      professionalismRating: professionalismRating || undefined,
+      communicationRating: communicationRating || undefined,
+      valueRating: valueRating || undefined,
+    }, {
+      onSuccess: () => {
+        toast.success("Review submitted. Thank you!");
+        qc.invalidateQueries({ queryKey: ["bookings-for-repair", jobId] });
+      },
+      onError: (e: any) => {
+        toast.error(e?.message ?? "Could not submit review");
+        qc.invalidateQueries({ queryKey: ["bookings-for-repair", jobId] });
+      }
+    });
   };
 
   return (
@@ -368,11 +401,107 @@ function ReviewDisplay({ review }: { review: Review }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// Technician review of customer
+// ────────────────────────────────────────────────────────────────────────────────
+
+function CustomerReviewForm({ jobId }: { jobId: string }) {
+  const [rating, setRating] = useState(5);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const mutation = useApiMutation(`/api/reviews/by-technician/${jobId}`, "POST", [["repair-job", jobId]]);
+
+  const submit = async () => {
+    if (rating < 1) {
+      toast.error("Please provide a rating");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await mutation.mutateAsync({ rating, title: title || undefined, body: body || undefined });
+      toast.success("Review submitted. Thank you!");
+    } catch (e: any) {
+      toast.error(e?.message ?? "Could not submit review");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="border-primary/40 bg-primary/5">
+      <CardHeader>
+        <CardTitle className="text-base">Review this customer</CardTitle>
+        <CardDescription>How was your experience working with this customer?</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>Overall rating</Label>
+          <StarInput value={rating} onChange={setRating} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="cr-title">Headline (optional)</Label>
+          <Input id="cr-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Great customer!" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="cr-body">Review (optional)</Label>
+          <Textarea id="cr-body" rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Share details about your experience…" />
+        </div>
+        <Button onClick={submit} disabled={submitting}>
+          {submitting ? "Submitting…" : "Submit review"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomerReviewDisplay({ review, isTech }: { review: Review; isTech: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Star className="h-4 w-4 text-amber-400" /> {isTech ? "Your review of customer" : "Technician's review of you"}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex items-center gap-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Star key={i} className={`h-4 w-4 ${i < review.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+          ))}
+          <span className="text-xs text-muted-foreground">{timeAgo(review.createdAt)}</span>
+        </div>
+        {review.title && <p className="font-medium">{review.title}</p>}
+        {review.body && <p className="text-sm text-muted-foreground">{review.body}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
 // Technician workflow controls
 // ────────────────────────────────────────────────────────────────────────────────
 
-function TechnicianWorkflow({ job, onRefresh }: { job: RepairJob; onRefresh: () => void }) {
-  const transition = useApiMutation(`/api/repair-jobs/${job.id}/transition`, "POST");
+function TechnicianWorkflow({ job, onRefresh, disabled }: { job: RepairJob; onRefresh: () => void; disabled?: boolean }) {
+  const transition = useApiMutation(
+    `/api/repair-jobs/${job.id}/transition`, 
+    "POST",
+    [["repair-job", job.id], ["technician-jobs"], ["history"]],
+    {
+      queryKey: ["technician-jobs", job.id],
+      updater: (oldData: any, newVars: any) => {
+        if (!oldData || !oldData.jobs) return oldData;
+        return {
+          ...oldData,
+          jobs: oldData.jobs.map((j: any) => {
+            if (j.id === job.id || j.repairJob?.id === job.id) {
+              return { ...j, repairJob: { ...j.repairJob, status: newVars.status } };
+            }
+            return j;
+          })
+        };
+      }
+    }
+  );
   const [transitioning, setTransitioning] = useState(false);
 
   const advance = async (next: string) => {
@@ -405,7 +534,7 @@ function TechnicianWorkflow({ job, onRefresh }: { job: RepairJob; onRefresh: () 
             <StatusBadge status={job.status} />
           </div>
           {nextStatus && (
-            <Button onClick={() => advance(nextStatus)} disabled={transitioning} className="w-full">
+            <Button onClick={() => advance(nextStatus)} disabled={disabled || transitioning} className="w-full">
               {NEXT_STATUS_LABEL[nextStatus]}
             </Button>
           )}
@@ -422,7 +551,6 @@ function TechnicianWorkflow({ job, onRefresh }: { job: RepairJob; onRefresh: () 
 
       {/* Quote submission */}
       <QuoteForm
-        jobId={job.id}
         repairRequestId={job.booking.repairRequest.id}
         existingQuote={job.booking.quote}
         enabled={canSubmitQuote || job.status === "QUOTE_SUBMITTED" || job.status === "AWAITING_APPROVAL"}
@@ -432,197 +560,21 @@ function TechnicianWorkflow({ job, onRefresh }: { job: RepairJob; onRefresh: () 
       {/* Diagnosis & work performed */}
       <DiagnosisForm job={job} onSaved={onRefresh} />
 
-      {/* Parts */}
-      <PartsForm job={job} onSaved={onRefresh} />
+      {/* Warranty (if completed) */}
+      {job.status === "COMPLETED" && !job.warranty && (
+        <WarrantyForm job={job} onSaved={onRefresh} />
+      )}
     </div>
   );
 }
 
-function QuoteForm({
-  jobId,
-  repairRequestId,
-  existingQuote,
-  enabled,
-  onSaved,
-}: {
-  jobId: string;
-  repairRequestId: string;
-  existingQuote?: Quote | null;
-  enabled: boolean;
-  onSaved: () => void;
-}) {
-  const [items, setItems] = useState<{ description: string; quantity: string; unitPrice: string }[]>(
-    existingQuote?.items?.map((i) => ({
-      description: i.description,
-      quantity: String(i.quantity),
-      unitPrice: String(i.unitPrice),
-    })) ?? [{ description: "", quantity: "1", unitPrice: "" }],
-  );
-  const [inspectionFee, setInspectionFee] = useState(existingQuote ? String(existingQuote.inspectionFee) : "");
-  const [labor, setLabor] = useState(existingQuote ? String(existingQuote.labor) : "");
-  const [taxesFees, setTaxesFees] = useState(existingQuote ? String(existingQuote.taxesFees) : "");
-  const [warrantyMonths, setWarrantyMonths] = useState(existingQuote?.warrantyMonths ? String(existingQuote.warrantyMonths) : "");
-  const [estimatedDurationHours, setEstimatedDurationHours] = useState(
-    existingQuote?.estimatedDurationHours ? String(existingQuote.estimatedDurationHours) : "",
-  );
-  const [notes, setNotes] = useState(existingQuote?.notes ?? "");
-  const [submitting, setSubmitting] = useState(false);
 
-  const mutation = useApiMutation(`/api/quotes`, "POST");
-
-  const addItem = () => setItems([...items, { description: "", quantity: "1", unitPrice: "" }]);
-  const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
-  const updateItem = (i: number, field: "description" | "quantity" | "unitPrice", value: string) =>
-    setItems(items.map((it, idx) => (idx === i ? { ...it, [field]: value } : it)));
-
-  const total = useMemo(() => {
-    const itemsTotal = items.reduce((s, it) => {
-      const qty = parseInt(it.quantity || "0", 10) || 0;
-      const price = parseInt(it.unitPrice || "0", 10) || 0;
-      return s + qty * price;
-    }, 0);
-    const insp = parseInt(inspectionFee || "0", 10) || 0;
-    const lab = parseInt(labor || "0", 10) || 0;
-    const tax = parseInt(taxesFees || "0", 10) || 0;
-    return itemsTotal + insp + lab + tax;
-  }, [items, inspectionFee, labor, taxesFees]);
-
-  const submit = async () => {
-    if (!repairRequestId) {
-      toast.error("Missing repair request context.");
-      return;
-    }
-    const cleanItems = items
-      .filter((it) => it.description.trim() && parseInt(it.unitPrice || "0", 10) > 0)
-      .map((it) => ({
-        description: it.description.trim(),
-        quantity: parseInt(it.quantity || "1", 10) || 1,
-        unitPrice: parseInt(it.unitPrice || "0", 10) || 0,
-      }));
-    setSubmitting(true);
-    try {
-      await mutation.mutateAsync({
-        repairRequestId,
-        inspectionFee: parseInt(inspectionFee || "0", 10) || 0,
-        labor: parseInt(labor || "0", 10) || 0,
-        taxesFees: parseInt(taxesFees || "0", 10) || 0,
-        warrantyMonths: warrantyMonths ? parseInt(warrantyMonths, 10) : undefined,
-        estimatedDurationHours: estimatedDurationHours ? parseInt(estimatedDurationHours, 10) : undefined,
-        notes: notes.trim() || undefined,
-        items: cleanItems,
-      });
-      toast.success("Quote submitted.");
-      onSaved();
-    } catch (e: any) {
-      toast.error(e?.message ?? "Could not submit quote");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (!enabled) return null;
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between gap-2 text-base">
-          <span className="flex items-center gap-2"><ClipboardList className="h-4 w-4 text-primary" /> Quote</span>
-          {existingQuote && <StatusBadge status={existingQuote.status} />}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">Items / parts</Label>
-          {items.map((it, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2">
-              <Input
-                className="col-span-12 sm:col-span-6"
-                placeholder="Description (e.g. Drive belt)"
-                value={it.description}
-                onChange={(e) => updateItem(i, "description", e.target.value)}
-              />
-              <Input
-                className="col-span-3 sm:col-span-2"
-                type="number"
-                min={1}
-                placeholder="Qty"
-                value={it.quantity}
-                onChange={(e) => updateItem(i, "quantity", e.target.value)}
-              />
-              <Input
-                className="col-span-7 sm:col-span-3"
-                type="number"
-                min={0}
-                placeholder="Unit price (ETB)"
-                value={it.unitPrice}
-                onChange={(e) => updateItem(i, "unitPrice", e.target.value)}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="col-span-2 sm:col-span-1"
-                onClick={() => removeItem(i)}
-                disabled={items.length === 1}
-                aria-label="Remove item"
-              >
-                <Trash2 className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
-          ))}
-          <Button variant="outline" size="sm" onClick={addItem}>
-            <Plus className="h-4 w-4" /> Add item
-          </Button>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="q-insp">Inspection fee (ETB)</Label>
-            <Input id="q-insp" type="number" min={0} value={inspectionFee} onChange={(e) => setInspectionFee(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="q-labor">Labor (ETB)</Label>
-            <Input id="q-labor" type="number" min={0} value={labor} onChange={(e) => setLabor(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="q-tax">Taxes &amp; fees (ETB)</Label>
-            <Input id="q-tax" type="number" min={0} value={taxesFees} onChange={(e) => setTaxesFees(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="q-warranty">Warranty months (optional)</Label>
-            <Input id="q-warranty" type="number" min={0} value={warrantyMonths} onChange={(e) => setWarrantyMonths(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="q-duration">Estimated duration hours (optional)</Label>
-            <Input id="q-duration" type="number" min={0} value={estimatedDurationHours} onChange={(e) => setEstimatedDurationHours(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="q-notes">Notes for customer (optional)</Label>
-          <Textarea id="q-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Explain what's included, assumptions, etc." />
-        </div>
-
-        <div className="flex items-center justify-between rounded-md bg-muted/40 p-3">
-          <span className="text-sm text-muted-foreground">Total estimate</span>
-          <span className="text-lg font-bold text-primary">{formatCurrency(total)}</span>
-        </div>
-
-        <Button onClick={submit} disabled={submitting} className="w-full">
-          {submitting ? "Submitting…" : existingQuote ? "Update quote" : "Submit quote"}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
 
 function DiagnosisForm({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
   const [diagnosis, setDiagnosis] = useState(job.diagnosis ?? "");
   const [workPerformed, setWorkPerformed] = useState(job.workPerformed ?? "");
   const [submitting, setSubmitting] = useState(false);
-  const mutation = useApiMutation(`/api/repair-jobs/${job.id}/diagnosis`, "POST");
+  const mutation = useApiMutation(`/api/repair-jobs/${job.id}/diagnosis`, "POST", [["repair-job", job.id]]);
 
   const submit = async () => {
     setSubmitting(true);
@@ -674,7 +626,7 @@ function PartsForm({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
     })) ?? [{ name: "", partNumber: "", quantity: "1", unitCost: "" }],
   );
   const [submitting, setSubmitting] = useState(false);
-  const mutation = useApiMutation(`/api/repair-jobs/${job.id}/parts`, "POST");
+  const mutation = useApiMutation(`/api/repair-jobs/${job.id}/parts`, "POST", [["repair-job", job.id]]);
 
   const add = () => setParts([...parts, { name: "", partNumber: "", quantity: "1", unitCost: "" }]);
   const remove = (i: number) => setParts(parts.filter((_, idx) => idx !== i));
@@ -731,6 +683,145 @@ function PartsForm({ job, onSaved }: { job: RepairJob; onSaved: () => void }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────────
+// Warranty Form
+// ────────────────────────────────────────────────────────────────────────────────
+
+function WarrantyForm({ job, existingWarranty, onSaved, onCancel }: { job: RepairJob; existingWarranty?: any; onSaved: () => void; onCancel?: () => void }) {
+  const [durationMonths, setDurationMonths] = useState(String(existingWarranty?.durationMonths ?? job.booking.quote?.warrantyMonths ?? ""));
+  const [coveredWork, setCoveredWork] = useState(existingWarranty?.coveredWork ?? job.booking.quote?.notes ?? "");
+  const [documentUrls, setDocumentUrls] = useState<string[]>(existingWarranty?.documentUrl ? [existingWarranty.documentUrl] : []);
+  const [submitting, setSubmitting] = useState(false);
+  const isEditing = !!existingWarranty;
+  const mutation = useApiMutation(isEditing ? `/api/warranties/${existingWarranty.id}` : `/api/warranties`, isEditing ? "PUT" : "POST", [["repair-job", job.id], ["warranties"]]);
+
+  const submit = () => {
+    if (!durationMonths || !coveredWork) {
+      toast.error("Please enter duration and covered work.");
+      return;
+    }
+    
+    mutation.mutate({
+      jobId: job.id,
+      durationMonths: parseInt(durationMonths, 10),
+      coveredWork,
+      documentUrl: documentUrls[0], // Support 1 document for now
+    }, {
+      onSuccess: () => {
+        toast.success(isEditing ? "Warranty updated." : "Warranty created.");
+        // UI will refetch due to useApiMutation invalidation
+      },
+      onError: (e: any) => {
+        toast.error(e?.message ?? "Could not save warranty");
+      }
+    });
+    
+    // Close instantly
+    onSaved();
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldCheck className="h-4 w-4 text-emerald-600" /> {isEditing ? "Edit warranty" : "Create warranty"}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="w-dur">Duration (months)</Label>
+          <Input id="w-dur" type="number" min={1} value={durationMonths} onChange={(e) => setDurationMonths(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="w-work">Covered work</Label>
+          <Textarea id="w-work" rows={3} value={coveredWork} onChange={(e) => setCoveredWork(e.target.value)} placeholder="Describe what is covered by this warranty." />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Warranty Document (optional)</Label>
+          <MediaUploader value={documentUrls} onChange={setDocumentUrls} maxFiles={1} />
+        </div>
+        <div className="flex flex-col sm:flex-row items-center gap-2">
+          <Button onClick={submit} disabled={submitting} className="w-full sm:flex-1">
+            {submitting ? "Saving…" : isEditing ? "Save changes" : "Create warranty"}
+          </Button>
+          {onCancel && (
+            <Button variant="outline" onClick={onCancel} disabled={submitting} className="w-full sm:flex-1">
+              Cancel
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+function WarrantyDisplay({ job, showTechControls, onRefresh }: { job: RepairJob; showTechControls: boolean; onRefresh: () => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const deleteMutation = useApiMutation(
+    `/api/warranties/${job.warranty?.id}`, 
+    "DELETE", 
+    [["repair-job", job.id], ["warranties"]],
+    {
+      queryKey: ["repair-job", job.id],
+      updater: (oldData: any, newVars: any) => {
+        if (!oldData || !oldData.job) return oldData;
+        return {
+          ...oldData,
+          job: { ...oldData.job, warranty: null }
+        };
+      }
+    }
+  );
+  const qc = useQueryClient();
+
+  if (!job.warranty) return null;
+
+  if (isEditing) {
+    return <WarrantyForm job={job} existingWarranty={job.warranty} onSaved={() => { setIsEditing(false); onRefresh(); }} onCancel={() => setIsEditing(false)} />;
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ShieldCheck className="h-4 w-4 text-emerald-600" /> Warranty
+          <StatusBadge status={job.warranty.status} />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <p><span className="text-muted-foreground">Duration:</span> {job.warranty.durationMonths} months</p>
+        <p><span className="text-muted-foreground">Valid:</span> {formatDateTime(job.warranty.startDate)} → {formatDateTime(job.warranty.endDate)}</p>
+        <p><span className="text-muted-foreground">Covered work:</span> {job.warranty.coveredWork}</p>
+        {job.warranty.documentUrl && (
+          <Button variant="outline" size="sm" asChild className="mt-2">
+            <a href={`/api/uploads/${job.warranty.documentUrl}`} target="_blank" rel="noopener noreferrer">
+              View Document
+            </a>
+          </Button>
+        )}
+        {showTechControls && (
+          <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
+            <Button size="sm" variant="outline" onClick={() => setIsEditing(true)}>Edit</Button>
+            <Button size="sm" variant="destructive" onClick={() => {
+              if (confirm("Are you sure you want to delete this warranty?")) {
+
+                deleteMutation.mutate({}, {
+                  onSuccess: () => {
+                    toast.success("Warranty deleted");
+                    onRefresh();
+                  },
+                  onError: (e: any) => toast.error(e?.message ?? "Could not delete warranty")
+                });
+              }
+            }}>Delete</Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
 // Main screen
 // ────────────────────────────────────────────────────────────────────────────────
 
@@ -742,16 +833,29 @@ export function RepairScreen({ jobId }: { jobId: string }) {
   // for customers, use /api/bookings and find the matching repairJob.
   const isTechView = role === "TECHNICIAN" || role === "ADMIN";
 
+  const qc = useQueryClient();
+  
+  let isActive = true;
+  if (isTechView) {
+    const cached = qc.getQueryData<{ jobs: RepairJob[] }>(["technician-jobs", jobId]);
+    const j = cached?.jobs.find((x) => x.id === jobId);
+    if (j) isActive = !["COMPLETED", "CANCELLED"].includes(j.status);
+  } else {
+    const cached = qc.getQueryData<{ bookings: { repairJob: RepairJob }[] }>(["bookings-for-repair", jobId]);
+    const b = cached?.bookings.find((x: any) => x.repairJob?.id === jobId) as any;
+    if (b && b.repairJob) isActive = !["COMPLETED", "CANCELLED"].includes(b.repairJob.status);
+  }
+
   const {
     data: techData,
     isLoading: techLoading,
     isError: techError,
     error: techErr,
     refetch: techRefetch,
-  } = useApi<{ jobs: RepairJob[] }>(
+  } = useApi<{ jobs: RepairJob[]; status?: string }>(
     ["technician-jobs", jobId],
     isTechView ? "/api/technician/jobs" : null,
-    { refetchInterval: 10_000 },
+    { refetchInterval: isActive ? 10_000 : false },
   );
 
   const {
@@ -763,14 +867,19 @@ export function RepairScreen({ jobId }: { jobId: string }) {
   } = useApi<{ bookings: { repairJob: RepairJob }[] }>(
     ["bookings-for-repair", jobId],
     !isTechView ? "/api/bookings" : null,
-    { refetchInterval: 10_000 },
+    { refetchInterval: isActive ? 10_000 : false },
   );
 
   const job = useMemo(() => {
-    if (isTechView) {
-      return techData?.jobs.find((j) => j.id === jobId);
+    const list = isTechView ? techData?.jobs : custData?.bookings;
+    const b = list?.find((x: any) => x.id === jobId || x.repairJob?.id === jobId) as any;
+    if (b) {
+      if (b.repairJob) {
+        return { ...b.repairJob, booking: b };
+      }
+      return b;
     }
-    return custData?.bookings.find((b) => b.repairJob?.id === jobId)?.repairJob;
+    return null;
   }, [isTechView, techData, custData, jobId]);
 
   // Realtime socket.io: best-effort — falls back to polling if unavailable.
@@ -1023,24 +1132,19 @@ export function RepairScreen({ jobId }: { jobId: string }) {
             </Card>
           )}
 
-          {/* Review / warranty (customer view, completed jobs) */}
-          {!showTechControls && job.status === "COMPLETED" && (
+          {/* Review / warranty */}
+          {job.status === "COMPLETED" && (
             <>
-              {job.review ? <ReviewDisplay review={job.review} /> : <ReviewForm jobId={job.id} />}
+              {!showTechControls && (job.review ? <ReviewDisplay review={job.review} /> : <ReviewForm jobId={job.id} />)}
+              {!showTechControls && job.customerReview && <CustomerReviewDisplay review={job.customerReview} isTech={false} />}
+              {showTechControls && (job.customerReview ? <CustomerReviewDisplay review={job.customerReview} isTech={true} /> : <CustomerReviewForm jobId={job.id} />)}
+              {showTechControls && job.review && <ReviewDisplay review={job.review} />}
               {job.warranty && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <ShieldCheck className="h-4 w-4 text-emerald-600" /> Warranty
-                      <StatusBadge status={job.warranty.status} />
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    <p><span className="text-muted-foreground">Duration:</span> {job.warranty.durationMonths} months</p>
-                    <p><span className="text-muted-foreground">Valid:</span> {formatDateTime(job.warranty.startDate)} → {formatDateTime(job.warranty.endDate)}</p>
-                    <p><span className="text-muted-foreground">Covered work:</span> {job.warranty.coveredWork}</p>
-                  </CardContent>
-                </Card>
+                <WarrantyDisplay
+                  job={job}
+                  showTechControls={showTechControls}
+                  onRefresh={isTechView ? techRefetch : custRefetch}
+                />
               )}
             </>
           )}
@@ -1095,13 +1199,34 @@ export function RepairScreen({ jobId }: { jobId: string }) {
                   </div>
                 </div>
                 {tech.phone && <p className="flex items-center gap-1 text-sm text-muted-foreground"><MessageSquare className="h-3.5 w-3.5" /> {tech.phone}</p>}
-                <Button variant="outline" size="sm" className="w-full" onClick={() => navigate(`technicians/${tech.id}`)}>View profile</Button>
+                <div className="flex gap-2">
+                  <TechnicianProfileDialog technicianId={tech.id}>
+                    <Button variant="outline" size="sm" className="flex-1">
+                      View profile
+                    </Button>
+                  </TechnicianProfileDialog>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={() => navigate(`messages/new?technicianId=${tech.id}`)}
+                    title="Message technician"
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" /> Message
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : null}
 
           {/* Tech workflow controls */}
-          {showTechControls && <TechnicianWorkflow job={job} onRefresh={onRefresh} />}
+          {showTechControls && (
+            <>
+              <TechnicianWorkflow job={job} onRefresh={techRefetch} disabled={techData?.status === "PENDING"} />
+              <DiagnosisForm job={job} onSaved={techRefetch} />
+              <PartsForm job={job} onSaved={techRefetch} />
+            </>
+          )}
 
           {/* AI technician brief + repair summary */}
           {booking.repairRequest && (

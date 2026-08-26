@@ -164,7 +164,8 @@ async function verifyCustomerJourney() {
       bookingId: booking.id,
       customerId: user.customerProfile!.id,
       amount: quote.totalEstimate,
-      providerRef: "test-payment-ref-" + Date.now(),
+      provider: "mock",
+      providerPaymentId: "test-payment-ref-" + Date.now(),
       status: "PENDING"
     }
   });

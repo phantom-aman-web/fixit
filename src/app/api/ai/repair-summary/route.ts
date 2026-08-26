@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       include: {
         booking: {
           include: {
-            customer: { include: { user: true } },
+            customer: { include: { user: { select: { id: true, name: true, email: true, image: true, role: true } } } },
             technician: true,
             repairRequest: {
               include: {
@@ -66,3 +66,4 @@ export async function POST(req: NextRequest) {
     return apiError(e);
   }
 }
+

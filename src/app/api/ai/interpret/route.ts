@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       if (!s || s.customerId !== profile.id) throw new HttpError(403, "Not your session");
     }
 
-    const result = await interpretProblem(profile.userId, parsed.text, parsed.sessionId);
+    const result = await interpretProblem(profile.id, parsed.text, parsed.sessionId);
 
     let isKnownDomain = false;
     if (result.interpretation?.equipment?.category) {

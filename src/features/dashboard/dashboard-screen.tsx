@@ -26,6 +26,7 @@ import {
   LoadingState,
   ErrorState,
   EmptyState,
+  DashboardSkeleton,
 } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,7 +112,8 @@ type RecentSession = {
   id: string;
   status: string;
   startedAt: string;
-  category: Category;
+  categoryId?: string;
+  category?: Category;
   problem?: { id: string; description: string } | null;
 };
 
@@ -188,7 +190,7 @@ export function DashboardScreen() {
   if (status === "loading") {
     return (
       <PageContainer>
-        <LoadingState label="Loading your dashboard…" />
+        <DashboardSkeleton />
       </PageContainer>
     );
   }
@@ -248,8 +250,7 @@ export function DashboardScreen() {
 function CustomerDashboard({ name }: { name: string }) {
   const { data, isLoading, error, refetch } = useApi<DashboardData>(
     ["customer-dashboard"],
-    "/api/customer/dashboard",
-    { refetchInterval: 60_000 },
+    "/api/customer/dashboard"
   );
 
   const dash = data?.dashboard;
@@ -292,7 +293,7 @@ function CustomerDashboard({ name }: { name: string }) {
       />
 
       {isLoading ? (
-        <LoadingState label="Loading your dashboard…" />
+        <DashboardSkeleton />
       ) : error ? (
         <ErrorState
           title="Could not load your dashboard"
@@ -761,7 +762,7 @@ function SessionCard({ session }: { session: RecentSession }) {
     <Card>
       <CardContent className="flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary">{session.category.name}</Badge>
+          <Badge variant="secondary">{session.category?.name || "Diagnostic Session"}</Badge>
           <StatusBadge status={session.status} />
           <span className="ml-auto text-xs text-muted-foreground">{timeAgo(session.startedAt)}</span>
         </div>
