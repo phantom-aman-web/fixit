@@ -30,6 +30,10 @@ const publicSrc = path.join(process.cwd(), "public");
 const publicDest = path.join(standaloneDir, "public");
 
 if (!fs.existsSync(standaloneDir)) {
+  if (process.env.VERCEL) {
+    console.log("Vercel deployment detected. Skipping standalone copy since standalone output is disabled on Vercel.");
+    process.exit(0);
+  }
   console.error("Error: .next/standalone does not exist. Run `next build` first.");
   process.exit(1);
 }
