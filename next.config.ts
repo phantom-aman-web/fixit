@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Vercel handles deployments natively. standalone mode breaks Vercel routing, causing 404 DEPLOYMENT_NOT_FOUND.
+  output: process.env.VERCEL ? undefined : "standalone",
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,
