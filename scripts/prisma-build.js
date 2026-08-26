@@ -1,7 +1,12 @@
 const { execSync } = require('child_process');
 
-// Vercel Postgres provides POSTGRES_URL_NON_POOLING instead of DIRECT_URL.
-// If DIRECT_URL is missing, we auto-fill it so Prisma doesn't crash during the build.
+// Vercel Postgres provides POSTGRES_PRISMA_URL and POSTGRES_URL_NON_POOLING.
+// If DATABASE_URL or DIRECT_URL are missing, we auto-fill them so Prisma doesn't crash.
+if (!process.env.DATABASE_URL && process.env.POSTGRES_PRISMA_URL) {
+  process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL;
+  console.log("Auto-configured DATABASE_URL using Vercel Postgres URL.");
+}
+
 if (!process.env.DIRECT_URL) {
   if (process.env.POSTGRES_URL_NON_POOLING) {
     process.env.DIRECT_URL = process.env.POSTGRES_URL_NON_POOLING;
